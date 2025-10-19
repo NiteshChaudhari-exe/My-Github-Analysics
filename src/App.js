@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Activity, GitBranch, Code, TrendingUp, Users, Star, GitCommit, Moon, Coffee, Download } from 'lucide-react';
-import { fetchGitHub } from './githubApi';
+import { fetchGitHub, fetchRepoLanguages, batchFetch } from './githubApi';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
+import RepoList from './components/RepoList';
+import RepoModal from './components/RepoModal';
 
 // Helper for GraphQL queries
 async function fetchGitHubGraphQL(query, variables = {}) {
@@ -31,14 +33,17 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
   });
   const [languageData, setLanguageData] = useState([]);
   const [commitData, setCommitData] = useState([]);
+  const [repos, setRepos] = useState([]);
+  const [activeRepo, setActiveRepo] = useState(null);
 
   useEffect(() => {
     async function loadGitHubStats() {
       try {
         // 1. Get user info and repositories (first 50 for demo, increase if needed)
         const user = await fetchGitHub('/user');
-        const repos = await fetchGitHub('/user/repos?per_page=50');
-        const repoNames = repos.map(r => r.name);
+  const repos = await fetchGitHub('/user/repos?per_page=100');
+  setRepos(repos);
+  const repoNames = repos.map(r => r.name);
 
         // 2. Prepare GraphQL query for commit, PR, and review counts
         const repoQueries = repoNames.map(
@@ -78,36 +83,50 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
         // 3. Fetch stats via GraphQL
         const data = await fetchGitHubGraphQL(query);
 
-        // 4. Aggregate stats
+        // 4. Aggregate stats (commits, PRs, reviews)
         let totalCommits = 0;
         let totalPRs = 0;
         let totalReviews = 0;
-        const langCount = {};
 
         Object.values(data).forEach(repo => {
-          // Commits
           totalCommits += repo.defaultBranchRef?.target?.history?.totalCount || 0;
-          // PRs
           totalPRs += repo.pullRequests?.totalCount || 0;
-          // Reviews (sum for first 10 PRs per repo)
           if (repo.pullRequests?.nodes) {
             totalReviews += repo.pullRequests.nodes.reduce((sum, pr) => sum + (pr.reviews?.totalCount || 0), 0);
           }
-          // Languages
-          if (repo.primaryLanguage?.name) {
-            langCount[repo.primaryLanguage.name] = (langCount[repo.primaryLanguage.name] || 0) + 1;
-          }
         });
 
-        const totalLang = Object.values(langCount).reduce((a, b) => a + b, 0);
-        const langArr = Object.entries(langCount).map(([name, value], i) => ({
+        // 5. Fetch languages per repo and aggregate by bytes
+        // Build list of owner/repo pairs
+        const owner = user.login;
+        const repoPairs = repos.map(r => ({ owner, repo: r.name }));
+
+        // Use batchFetch to avoid hammering the API
+        const languagesList = await batchFetch(repoPairs, async ({ owner, repo }) => {
+          try {
+            return await fetchRepoLanguages(owner, repo);
+          } catch (e) {
+            console.warn('language fetch error', e);
+            return {};
+          }
+        }, 6);
+
+        const langBytes = {};
+        languagesList.forEach(langObj => {
+          Object.entries(langObj || {}).forEach(([name, bytes]) => {
+            langBytes[name] = (langBytes[name] || 0) + bytes;
+          });
+        });
+
+        const totalBytes = Object.values(langBytes).reduce((a, b) => a + b, 0) || 1;
+        const colorPalette = ['#f7df1e', '#3178c6', '#3776ab', '#61dafb', '#1572b6', '#e34c26', '#563d7c', '#b07219', '#00bcd4', '#ff9800'];
+        const langArr = Object.entries(langBytes).map(([name, bytes], i) => ({
           name,
-          value: Math.round((value / totalLang) * 100),
-          color: ['#f7df1e', '#3178c6', '#3776ab', '#61dafb', '#1572b6', '#e34c26', '#563d7c', '#b07219'][i % 8]
-        }));
+          value: Math.round((bytes / totalBytes) * 100),
+          color: colorPalette[i % colorPalette.length]
+        })).sort((a, b) => b.value - a.value);
 
         setLanguageData(langArr);
-
         setAnimatedStats({
           commits: totalCommits,
           repos: repos.length,
@@ -117,6 +136,7 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
           codeReviews: totalReviews
         });
         setCommitData([]);
+        // keep repos state already set earlier
       } catch (e) {
         console.error(e);
       }
@@ -196,6 +216,16 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
 
       {/* Overview Content */}
       <div className="space-y-6 sm:space-y-8">
+        {/* Repo list */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-1">
+            <RepoList repos={repos} onOpenRepo={(r) => setActiveRepo(r)} />
+          </div>
+          <div className="lg:col-span-2">
+            {/* Language Pie Chart */}
+            
+          </div>
+        </div>
         {/* Stats Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-6">
           <StatCard icon={GitCommit} title="Total Commits" value={animatedStats.commits} color="from-green-500 to-emerald-600" />
@@ -206,48 +236,49 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
           <StatCard icon={Code} title="Code Reviews" value={animatedStats.codeReviews} color="from-yellow-500 to-orange-600" />
         </div>
 
-        {/* Language Pie Chart */}
         <div className={`${isDarkMode ? 'bg-gradient-to-br from-gray-900 to-gray-800 border-gray-700' : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'} p-4 sm:p-6 rounded-2xl border`}>
-          <h3 className={`text-lg sm:text-xl font-bold mb-4 sm:mb-6 flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-            <Code className="w-5 h-5 text-purple-400" />
-            Technology Stack
-          </h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <PieChart>
-              <Pie
-                data={languageData}
-                cx="50%"
-                cy="50%"
-                outerRadius={70}
-                dataKey="value"
-                stroke="none"
-              >
-                {languageData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
+              <h3 className={`text-lg sm:text-xl font-bold mb-4 sm:mb-6 flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                <Code className="w-5 h-5 text-purple-400" />
+                Technology Stack
+              </h3>
+              <ResponsiveContainer width="100%" height={200}>
+                <PieChart>
+                  <Pie
+                    data={languageData}
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={70}
+                    dataKey="value"
+                    stroke="none"
+                  >
+                    {languageData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: isDarkMode ? '#1f2937' : '#ffffff', 
+                      border: `1px solid ${isDarkMode ? '#374151' : '#e5e7eb'}`,
+                      borderRadius: '12px',
+                      color: isDarkMode ? '#ffffff' : '#000000'
+                    }} 
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4">
+                {languageData.map((lang) => (
+                  <div key={lang.name} className="flex items-center justify-between p-2 rounded-lg bg-gray-700/30">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: lang.color }}></div>
+                      <span className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{lang.name}</span>
+                    </div>
+                    <span className={`text-sm font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{lang.value}%</span>
+                  </div>
                 ))}
-              </Pie>
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: isDarkMode ? '#1f2937' : '#ffffff', 
-                  border: `1px solid ${isDarkMode ? '#374151' : '#e5e7eb'}`,
-                  borderRadius: '12px',
-                  color: isDarkMode ? '#ffffff' : '#000000'
-                }} 
-              />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4">
-            {languageData.map((lang) => (
-              <div key={lang.name} className="flex items-center justify-between p-2 rounded-lg bg-gray-700/30">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: lang.color }}></div>
-                  <span className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{lang.name}</span>
-                </div>
-                <span className={`text-sm font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{lang.value}%</span>
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
+
+        {/* (Duplicate Technology Stack removed; chart is shown above with the repo list) */}
 
         {/* Export Button */}
         <div className="flex items-center gap-2">
@@ -259,6 +290,7 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
             Export JSON
           </button>
         </div>
+        {activeRepo && <RepoModal repo={activeRepo} onClose={() => setActiveRepo(null)} />}
       </div>
     </div>
   );
