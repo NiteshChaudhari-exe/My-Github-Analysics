@@ -1,27 +1,31 @@
-import React, { useState, useEffect } from 'react';
-import { Activity, GitBranch, Code, TrendingUp, Users, Star, GitCommit, Moon, Coffee, Download } from 'lucide-react';
-import { fetchGitHub, fetchRepoLanguages, batchFetch } from './githubApi';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Activity, GitBranch, Code, TrendingUp, Users, Star, GitCommit, Moon, Coffee, Download, AlertCircle, FileJson, FileSpreadsheet, FileText } from 'lucide-react';
+import { fetchGitHub, fetchRepoLanguages, batchFetch, fetchGraphQL, fetchAllPagesREST, checkRateLimit } from './githubApi';
+import ErrorBoundary from './components/ErrorBoundary';
+import LoadingSpinner from './components/LoadingSpinner';
+import RepoSearch, { useRepoFilters } from './components/RepoSearch';
+import { exportDataAsJSON, exportDataAsCSV, generateReport } from './utils/export';
+import { useGitHubData } from './hooks/useGitHubData';
+import TimeSeriesCharts from './components/TimeSeriesCharts';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import RepoList from './components/RepoList';
 import RepoModal from './components/RepoModal';
+import Heatmap from './components/Heatmap';
 
-// Helper for GraphQL queries
-async function fetchGitHubGraphQL(query, variables = {}) {
-  const token = process.env.REACT_APP_GITHUB_TOKEN;
-  const res = await fetch('https://api.github.com/graphql', {
-    method: 'POST',
-    headers: {
-      Authorization: `bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-  const json = await res.json();
-  if (json.errors) throw new Error(json.errors.map(e => e.message).join(', '));
-  return json.data;
-}
+// GraphQL helper: use fetchGraphQL from githubApi (cached + rate-limit aware)
+
+const RATE_LIMIT_THRESHOLD = 50; // Warn when fewer than 50 requests remaining
+
+const ErrorNotification = ({ message, onDismiss }) => (
+  <div className="fixed bottom-4 right-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded flex items-center gap-2">
+    <AlertCircle className="w-5 h-5" />
+    <p>{message}</p>
+    <button onClick={onDismiss} className="ml-2 text-red-700 hover:text-red-900">×</button>
+  </div>
+);
 
 const EnhancedDeveloperAnalyticsDashboard = () => {
+  const [error, setError] = useState(null);
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [animatedStats, setAnimatedStats] = useState({
     commits: 0,
@@ -35,15 +39,48 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
   const [commitData, setCommitData] = useState([]);
   const [repos, setRepos] = useState([]);
   const [activeRepo, setActiveRepo] = useState(null);
+  const [contribDays, setContribDays] = useState([]);
+  const [monthlySeries, setMonthlySeries] = useState([]);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [progress, setProgress] = useState({ completed: 0, total: 0 });
+
+  // Repository filtering and sorting
+  const {
+    filteredRepos,
+    languages,
+    searchTerm,
+    setSearchTerm,
+    sortBy,
+    setSortBy,
+    filterLanguage,
+    setFilterLanguage
+  } = useRepoFilters(repos);
 
   useEffect(() => {
     async function loadGitHubStats() {
       try {
+        // Check rate limit before making requests
+        const rateLimit = await checkRateLimit();
+        if (rateLimit.remaining < RATE_LIMIT_THRESHOLD) {
+          setError(`Warning: ${rateLimit.remaining} API requests remaining. Resets at ${new Date(rateLimit.reset * 1000).toLocaleString()}`);
+        }
+
         // 1. Get user info and repositories (first 50 for demo, increase if needed)
         const user = await fetchGitHub('/user');
-  const repos = await fetchGitHub('/user/repos?per_page=100');
-  setRepos(repos);
-  const repoNames = repos.map(r => r.name);
+        const repos = await fetchGitHub('/user/repos?per_page=100');
+        
+        // Validate response data
+        if (!Array.isArray(repos)) {
+          throw new Error('Invalid repository data received from GitHub');
+        }
+        
+        setRepos(repos);
+        // Use Promise.all to ensure state is updated before continuing
+        await Promise.all([
+          new Promise(resolve => setTimeout(resolve, 0)), // Allow state update to complete
+          repos
+        ]);
+        const repoNames = repos.map(r => r.name);
 
         // 2. Prepare GraphQL query for commit, PR, and review counts
         const repoQueries = repoNames.map(
@@ -80,8 +117,8 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
           }
         `;
 
-        // 3. Fetch stats via GraphQL
-        const data = await fetchGitHubGraphQL(query);
+  // 3. Fetch stats via GraphQL (cached)
+  const data = await fetchGraphQL(query, {}, { useCache: true, ttl: 300 });
 
         // 4. Aggregate stats (commits, PRs, reviews)
         let totalCommits = 0;
@@ -136,6 +173,133 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
           codeReviews: totalReviews
         });
         setCommitData([]);
+        // 6. Fetch contributionsCollection for the last year (via GraphQL)
+        try {
+          const to = new Date();
+          const from = new Date();
+          from.setFullYear(from.getFullYear() - 1);
+          const contribQuery = `
+            query { 
+              user(login: "${user.login}") {
+                contributionsCollection(from: "${from.toISOString()}", to: "${to.toISOString()}") {
+                  contributionCalendar {
+                    weeks {
+                      contributionDays {
+                        date
+                        contributionCount
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `;
+          const contribData = await fetchGraphQL(contribQuery);
+          const weeks = contribData.user.contributionsCollection.contributionCalendar.weeks || [];
+          const days = [];
+          weeks.forEach(w => w.contributionDays.forEach(d => days.push({ date: d.date, count: d.contributionCount })));
+          setContribDays(days);
+
+          // 6b. Fetch commit and PR contributions (occurredAt) to separate commits vs PRs per month
+          try {
+            const detailQuery = `
+              query {
+                user(login: "${user.login}") {
+                  contributionsCollection(from: "${from.toISOString()}", to: "${to.toISOString()}") {
+                    commitContributionsByRepository(maxRepositories: 100) {
+                      repository { name }
+                      contributions(first: 100) { nodes { occurredAt } }
+                    }
+                    pullRequestContributionsByRepository(maxRepositories: 100) {
+                      repository { name }
+                      contributions(first: 100) { nodes { occurredAt } }
+                    }
+                  }
+                }
+              }
+            `;
+            const detailData = await fetchGraphQL(detailQuery, {}, { useCache: true, ttl: 300 });
+            const coll = detailData.user.contributionsCollection || {};
+            const commitBuckets = {};
+            const prBuckets = {};
+
+            (coll.commitContributionsByRepository || []).forEach(item => {
+              const nodes = item.contributions?.nodes || [];
+              nodes.forEach(n => {
+                const m = (new Date(n.occurredAt)).toISOString().slice(0,7);
+                commitBuckets[m] = (commitBuckets[m] || 0) + 1;
+              });
+            });
+
+            (coll.pullRequestContributionsByRepository || []).forEach(item => {
+              const nodes = item.contributions?.nodes || [];
+              nodes.forEach(n => {
+                const m = (new Date(n.occurredAt)).toISOString().slice(0,7);
+                prBuckets[m] = (prBuckets[m] || 0) + 1;
+              });
+            });
+
+            // Build months between from and to
+            const months = [];
+            const cursor = new Date(from.getFullYear(), from.getMonth(), 1);
+            while (cursor <= to) {
+              const y = cursor.getFullYear();
+              const mo = String(cursor.getMonth() + 1).padStart(2, '0');
+              months.push(`${y}-${mo}`);
+              cursor.setMonth(cursor.getMonth() + 1);
+            }
+
+            const series = months.map(m => ({ month: m, commits: commitBuckets[m] || 0, prs: prBuckets[m] || 0 }));
+            setMonthlySeries(series);
+            // If the series totals seem low compared to contributionCalendar, attempt REST fallback per repo
+            const totalFromSeries = series.reduce((s, x) => s + x.commits + x.prs, 0);
+            const totalFromCalendar = days.reduce((s, d) => s + (d.count||0), 0);
+            if (totalFromSeries < totalFromCalendar * 0.9) {
+              // likely truncated; fetch via REST per-repo (may be slow)
+              setLoadingDetails(true);
+              try {
+                const owner = user.login;
+                const allCommits = [];
+                const allPRs = [];
+                setProgress({ completed: 0, total: repos.length * 2 });
+                for (let i = 0; i < repos.length; i++) {
+                  const r = repos[i];
+                  // commits
+                  const commits = await fetchAllPagesREST(`/repos/${owner}/${r.name}/commits`, { per_page: 100, maxPages: 5 });
+                  allCommits.push(...commits.map(c => c.commit?.author?.date).filter(Boolean));
+                  setProgress(p => ({ ...p, completed: p.completed + 1 }));
+                  // pulls (state=all)
+                  const prs = await fetchAllPagesREST(`/repos/${owner}/${r.name}/pulls?state=all`, { per_page: 100, maxPages: 5 });
+                  allPRs.push(...prs.map(pull => pull.created_at).filter(Boolean));
+                  setProgress(p => ({ ...p, completed: p.completed + 1 }));
+                }
+
+                const commitBuckets = {};
+                allCommits.forEach(date => { const m = new Date(date).toISOString().slice(0,7); commitBuckets[m] = (commitBuckets[m] || 0) + 1; });
+                const prBuckets = {};
+                allPRs.forEach(date => { const m = new Date(date).toISOString().slice(0,7); prBuckets[m] = (prBuckets[m] || 0) + 1; });
+
+                const months = series.map(s => s.month);
+                const merged = months.map(m => ({ month: m, commits: commitBuckets[m] || 0, prs: prBuckets[m] || 0 }));
+                setMonthlySeries(merged);
+              } catch (e) {
+                console.warn('REST fallback failed', e);
+              } finally {
+                setLoadingDetails(false);
+                setProgress({ completed: 0, total: 0 });
+              }
+            }
+          } catch (e) {
+            console.warn('failed fetching commit/PR contributions detail', e);
+            // fallback: derive monthly totals from contributionCalendar
+            const monthMap = {};
+            days.forEach(d => { const m = d.date.slice(0,7); monthMap[m] = (monthMap[m] || 0) + (d.count||0); });
+            const months = Object.keys(monthMap).sort();
+            setMonthlySeries(months.map(m => ({ month: m, commits: monthMap[m], prs: 0 })));
+          }
+        } catch (e) {
+          console.warn('contrib fetch failed', e);
+        }
         // keep repos state already set earlier
       } catch (e) {
         console.error(e);
@@ -144,20 +308,30 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
     loadGitHubStats();
   }, []);
 
+  // monthlySeries is populated by the detailed GraphQL fetch inside loadGitHubStats
+
   const exportData = (format) => {
     const data = {
       stats: animatedStats,
       languages: languageData,
       commits: commitData,
+      monthlySeries,
+      contribDays,
       exportDate: new Date().toISOString()
     };
-    if (format === 'json') {
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `developer-analytics-${new Date().toISOString().split('T')[0]}.json`;
-      a.click();
+
+    switch (format) {
+      case 'json':
+        exportDataAsJSON(data);
+        break;
+      case 'csv':
+        exportDataAsCSV(data);
+        break;
+      case 'report':
+        generateReport(data);
+        break;
+      default:
+        console.error('Unsupported export format:', format);
     }
   };
 
@@ -175,7 +349,8 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
   );
 
   return (
-    <div className={`min-h-screen ${isDarkMode ? 'bg-gradient-to-br from-gray-950 via-gray-900 to-blue-950 text-white' : 'bg-gradient-to-br from-gray-50 via-white to-blue-50 text-gray-900'} p-3 sm:p-6`}>
+    <ErrorBoundary>
+      <div className={`min-h-screen ${isDarkMode ? 'bg-gradient-to-br from-gray-950 via-gray-900 to-blue-950 text-white' : 'bg-gradient-to-br from-gray-50 via-white to-blue-50 text-gray-900'} p-3 sm:p-6`}>
       {/* Header */}
       <div className="mb-6 sm:mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -213,21 +388,9 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
           Overview
         </button>
       </div>
-
-      {/* Overview Content */}
-      <div className="space-y-6 sm:space-y-8">
-        {/* Repo list */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-1">
-            <RepoList repos={repos} onOpenRepo={(r) => setActiveRepo(r)} />
-          </div>
-          <div className="lg:col-span-2">
-            {/* Language Pie Chart */}
-            
-          </div>
-        </div>
-        {/* Stats Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-6">
+      
+      {/* Stats Grid */}
+  <div className={`${isDarkMode ? 'border-gray-700' : 'border-gray-200'} grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-4 sm:gap-6 border-2 rounded-2xl shadow-sm p-3`}>
           <StatCard icon={GitCommit} title="Total Commits" value={animatedStats.commits} color="from-green-500 to-emerald-600" />
           <StatCard icon={GitBranch} title="Repositories" value={animatedStats.repos} color="from-blue-500 to-cyan-600" />
           <StatCard icon={TrendingUp} title="Contributions" value={animatedStats.contributions} color="from-purple-500 to-pink-600" />
@@ -236,7 +399,64 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
           <StatCard icon={Code} title="Code Reviews" value={animatedStats.codeReviews} color="from-yellow-500 to-orange-600" />
         </div>
 
-        <div className={`${isDarkMode ? 'bg-gradient-to-br from-gray-900 to-gray-800 border-gray-700' : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'} p-4 sm:p-6 rounded-2xl border`}>
+
+      {/* Overview Content */}
+      <div className="space-y-6 sm:space-y-8">
+        {/* Repo list + Heatmap (side-by-side on large screens) - now inside a single main container */}
+        <main className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+          <div className="lg:col-span-1 h-full">
+            <div className="flex flex-col sm:flex-row sm:items-stretch sm:gap-4 h-full">
+              {/* RepoList: on small screens place after Heatmap, keep left on large screens */}
+             
+                <div className={`${isDarkMode ? 'bg-gray-900/60 border-gray-700' : 'bg-white/80 border-gray-200'} p-3 sm:p-2 rounded-2xl border-2 shadow-sm h-72`}>
+                  <div className="mb-3">
+                    <RepoSearch onSearch={term => setSearchTerm(term)} className="mb-2" />
+                    <div className="flex gap-2">
+                      <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value)}
+                        className={`${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'} rounded-lg px-2 py-1 text-sm`}
+                      >
+                        <option value="stars">Stars</option>
+                        <option value="updated">Recently Updated</option>
+                        <option value="name">Name</option>
+                      </select>
+                      <select
+                        value={filterLanguage}
+                        onChange={(e) => setFilterLanguage(e.target.value)}
+                        className={`${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'} rounded-lg px-2 py-1 text-sm`}
+                      >
+                        <option value="">All Languages</option>
+                        {languages.map(lang => (
+                          <option key={lang} value={lang}>{lang}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <RepoList repos={filteredRepos} onOpenRepo={(r) => setActiveRepo(r)} />
+                </div>
+             
+            </div>
+          </div>
+          <div className="lg:col-span-2 order-first lg:order-last">
+            {/* Heatmap moved here from the left column; make it order-first on small screens */}
+            <div className={`${isDarkMode ? 'bg-gray-900/60 border-gray-700' : 'bg-white/80 border-gray-200'} p-3 sm:p-4 rounded-2xl border-2 shadow-sm h-72 mb-4`}> 
+              <Heatmap daily={contribDays} isDarkMode={isDarkMode} />
+            </div>
+            {/* Language Pie Chart */}
+          </div>
+        </main>
+
+        {/* Arrange charts and tech stack side-by-side on large screens */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2">
+            <div className={`${isDarkMode ? 'bg-gradient-to-br from-gray-900 to-gray-800 border-gray-700' : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'} p-4 sm:p-6 rounded-2xl border-2 shadow-sm h-full`}>
+              <h3 className={`text-lg sm:text-xl font-bold mb-4 sm:mb-6 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Monthly Activity</h3>
+              <TimeSeriesCharts series={monthlySeries} />
+            </div>
+          </div>
+          <div className="lg:col-span-1">
+            <div className={`${isDarkMode ? 'bg-gradient-to-br from-gray-900 to-gray-800 border-gray-700' : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'} p-4 sm:p-6 rounded-2xl border-2 shadow-sm h-full`}>
               <h3 className={`text-lg sm:text-xl font-bold mb-4 sm:mb-6 flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
                 <Code className="w-5 h-5 text-purple-400" />
                 Technology Stack
@@ -267,7 +487,7 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
               </ResponsiveContainer>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4">
                 {languageData.map((lang) => (
-                  <div key={lang.name} className="flex items-center justify-between p-2 rounded-lg bg-gray-700/30">
+                  <div key={lang.name} className={`${isDarkMode ? 'bg-gray-700/30 border-gray-600' : 'bg-white/80 border-gray-200'} flex items-center justify-between p-2 rounded-lg border`}>
                     <div className="flex items-center gap-2">
                       <div className="w-3 h-3 rounded-full" style={{ backgroundColor: lang.color }}></div>
                       <span className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{lang.name}</span>
@@ -277,22 +497,48 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
                 ))}
               </div>
             </div>
+          </div>
+        </div>
 
         {/* (Duplicate Technology Stack removed; chart is shown above with the repo list) */}
 
-        {/* Export Button */}
-        <div className="flex items-center gap-2">
-          <Download className="w-4 h-4 text-green-400" />
+        {/* Export Buttons */}
+        <div className="flex items-center gap-4 flex-wrap">
           <button 
             onClick={() => exportData('json')}
-            className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
           >
+            <FileJson className="w-4 h-4" />
             Export JSON
           </button>
+          <button 
+            onClick={() => exportData('csv')}
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            Export CSV
+          </button>
+          <button 
+            onClick={() => exportData('report')}
+            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
+          >
+            <FileText className="w-4 h-4" />
+            Generate Report
+          </button>
         </div>
+        {loadingDetails && (
+          <div className="mt-3 w-full">
+            <div className="text-sm text-gray-300">Fetching detailed history... ({progress.completed}/{progress.total})</div>
+            <div className="w-full bg-gray-700 rounded h-2 mt-1">
+              <div className="bg-green-500 h-2 rounded" style={{ width: `${progress.total ? (progress.completed / progress.total) * 100 : 0}%` }} />
+            </div>
+          </div>
+        )}
         {activeRepo && <RepoModal repo={activeRepo} onClose={() => setActiveRepo(null)} />}
       </div>
     </div>
+      {error && <ErrorNotification message={error} onDismiss={() => setError(null)} />}
+    </ErrorBoundary>
   );
 };
 
