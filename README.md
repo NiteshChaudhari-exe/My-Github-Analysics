@@ -123,12 +123,3 @@ If you want to make this project production-ready or more robust, consider:
 - Adding a lightweight backend proxy to avoid exposing tokens in the frontend in production
 
 ---
-
-If you'd like, I can:
-
-- Clean up remaining linter warnings and unused imports
-- Harden error handling for missing/invalid tokens and show inline UI errors
-- Add simple unit tests for `RepoList` filtering/sorting
-- Implement virtualization for the repo list (react-window)
-
-Tell me which one I should tackle next and I'll implement it and run the dev server to verify.
