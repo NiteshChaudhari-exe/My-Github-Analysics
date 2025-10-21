@@ -1,11 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Activity, GitBranch, Code, TrendingUp, Users, Star, GitCommit, Moon, Coffee, Download, AlertCircle, FileJson, FileSpreadsheet, FileText } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Activity, GitBranch, Code, TrendingUp, Users, Star, GitCommit, Moon, Coffee, AlertCircle, FileJson, FileSpreadsheet, FileText } from 'lucide-react';
 import { fetchGitHub, fetchRepoLanguages, batchFetch, fetchGraphQL, fetchAllPagesREST, checkRateLimit } from './githubApi';
 import ErrorBoundary from './components/ErrorBoundary';
-import LoadingSpinner from './components/LoadingSpinner';
 import RepoSearch, { useRepoFilters } from './components/RepoSearch';
 import { exportDataAsJSON, exportDataAsCSV, generateReport } from './utils/export';
-import { useGitHubData } from './hooks/useGitHubData';
 import TimeSeriesCharts from './components/TimeSeriesCharts';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import RepoList from './components/RepoList';
@@ -48,7 +46,6 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
   const {
     filteredRepos,
     languages,
-    searchTerm,
     setSearchTerm,
     sortBy,
     setSortBy,
@@ -408,7 +405,7 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
             <div className="flex flex-col sm:flex-row sm:items-stretch sm:gap-4 h-full">
               {/* RepoList: on small screens place after Heatmap, keep left on large screens */}
              
-                <div className={`${isDarkMode ? 'bg-gray-900/60 border-gray-700' : 'bg-white/80 border-gray-200'} p-3 sm:p-2 rounded-2xl border-2 shadow-sm h-72`}>
+                <div className={`${isDarkMode ? 'bg-gray-900/60 border-gray-700' : 'bg-white/80 border-gray-200'} p-3 sm:p-2 rounded-2xl border-2 shadow-sm h-75`}>
                   <div className="mb-3">
                     <RepoSearch onSearch={term => setSearchTerm(term)} className="mb-2" />
                     <div className="flex gap-2">
@@ -418,7 +415,6 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
                         className={`${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'} rounded-lg px-2 py-1 text-sm`}
                       >
                         <option value="stars">Stars</option>
-                        <option value="updated">Recently Updated</option>
                         <option value="name">Name</option>
                       </select>
                       <select
@@ -440,7 +436,7 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
           </div>
           <div className="lg:col-span-2 order-first lg:order-last">
             {/* Heatmap moved here from the left column; make it order-first on small screens */}
-            <div className={`${isDarkMode ? 'bg-gray-900/60 border-gray-700' : 'bg-white/80 border-gray-200'} p-3 sm:p-4 rounded-2xl border-2 shadow-sm h-72 mb-4`}> 
+            <div className={`${isDarkMode ? 'bg-gray-900/60 border-gray-700' : 'bg-white/80 border-gray-200'} p-3 sm:p-4 rounded-2xl border-2 shadow-sm h-80 mb-4`}> 
               <Heatmap daily={contribDays} isDarkMode={isDarkMode} />
             </div>
             {/* Language Pie Chart */}

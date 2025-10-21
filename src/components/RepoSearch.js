@@ -27,7 +27,7 @@ const RepoSearch = ({ onSearch, className = '' }) => {
 
 export const useRepoFilters = (repos) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState('stars'); // 'stars', 'updated', 'name'
+  const [sortBy, setSortBy] = useState('stars'); // 'stars', 'name'
   const [filterLanguage, setFilterLanguage] = useState('');
 
   const filteredRepos = useMemo(() => {
@@ -42,12 +42,10 @@ export const useRepoFilters = (repos) => {
 
         return matchesSearch && matchesLanguage;
       })
-      .sort((a, b) => {
+        .sort((a, b) => {
         switch (sortBy) {
           case 'stars':
             return b.stargazers_count - a.stargazers_count;
-          case 'updated':
-            return new Date(b.updated_at) - new Date(a.updated_at);
           case 'name':
             return a.name.localeCompare(b.name);
           default:
