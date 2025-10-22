@@ -1,19 +1,20 @@
 import React, { useState, useRef } from 'react';
-import { generateWeeks, buildMonthLabelMap, clamp, FLING, formatMonthLabel } from '../utils/heatmap';
+import { generateWeeks, clamp, FLING } from '../utils/heatmap';
 
 // Receives props.daily: Array of { date: 'YYYY-MM-DD', count: number }
-export default function Heatmap({ daily = [], isDarkMode = true }) {
+export default function Heatmap({ daily = [], isDarkMode = true, compact = false, showMonthLabels = false, paletteName = 'default' }) {
   const [hover, setHover] = useState(null); // {date, count, left, top}
   const [showDebug, setShowDebug] = useState(false);
   const containerRef = useRef(null);
   const scrollRef = useRef(null);
   const tooltipRef = useRef(null);
+  const focusedDateRef = useRef(null);
   const tooltipIdRef = useRef(`heatmap-tooltip-${Math.random().toString(36).slice(2,9)}`);
   const [showHint, setShowHint] = useState(false);
   const dragState = useRef({ isDown: false, startX: 0, scrollLeft: 0, lastX: 0, lastTime: 0, velocity: 0, momentumId: null });
-  // Virtualization config
-  const SQUARE_SIZE = 12; // px
-  const GAP = 6; // px gap between week columns (css gap)
+  // Virtualization config (adjust for compact mode)
+  const SQUARE_SIZE = compact ? 8 : 12; // px
+  const GAP = compact ? 4 : 6; // px gap between week columns (css gap)
   const COLUMN_STEP = SQUARE_SIZE + GAP; // effective step per week column
   const VIRTUAL_BUFFER = 8; // number of extra weeks to render on each side
   const [visibleRange, setVisibleRange] = React.useState({ start: 0, end: 0 });
@@ -25,8 +26,25 @@ export default function Heatmap({ daily = [], isDarkMode = true }) {
   // generate weeks using UTC-aware helper
   const { today, startDate, weeks } = generateWeeks({});
 
-  // helper: build mapping of weekIndex -> month short name for the week that contains each month's 1st day
-  const monthStarts = buildMonthLabelMap(startDate, today, weeks);
+  // (month labels removed per design)
+  // build month label map (weekIndex -> { label, dateObj }) when requested
+  const monthLabelMap = React.useMemo(() => {
+    if (!showMonthLabels) return {};
+    const map = {};
+    // find first-of-month dates and map to week index
+    const months = [];
+    const mCursor = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), 1));
+    while (mCursor <= today) {
+      months.push(new Date(mCursor));
+      mCursor.setUTCMonth(mCursor.getUTCMonth() + 1);
+    }
+    months.forEach(dt => {
+      const key = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,'0')}-01`;
+      const wi = weeks.findIndex(week => week.some(d => d.date === key));
+      if (wi >= 0) map[wi] = { label: dt.toLocaleString(undefined, { month: 'short' }), dateObj: dt };
+    });
+    return map;
+  }, [showMonthLabels, startDate, today, weeks]);
 
   const counts = daily.map(d => d.count || 0);
   const max = Math.max(...counts, 1);
@@ -42,7 +60,7 @@ export default function Heatmap({ daily = [], isDarkMode = true }) {
     warm: isDarkMode ? ['#0b1220','#3b1f1f','#7b2c1f','#c96b3b','#ff9b66'] : ['#fff5f0','#ffe6dc','#ffc9ad','#ff8a4c','#ff6b2d'],
     blue: isDarkMode ? ['#041024','#0b2a4a','#0f4a86','#0f6fbf','#3aa0ff'] : ['#f0f9ff','#d9f2ff','#a9ddff','#5fb8ff','#2b9cff']
   };
-  const currentPalette = PALETTES.default;
+  const currentPalette = PALETTES[paletteName] || PALETTES.default;
 
   function bucketFor(count) {
     if (!count) return 0;
@@ -292,6 +310,119 @@ export default function Heatmap({ daily = [], isDarkMode = true }) {
     return () => { el.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onResize); if (raf) cancelAnimationFrame(raf); };
   }, [weeks.length, COLUMN_STEP]);
 
+  // helper: find week/day index for a date
+  function findDatePosition(date) {
+    for (let wi = 0; wi < weeks.length; wi++) {
+      const di = weeks[wi].findIndex(d => d.date === date);
+      if (di >= 0) return { weekIdx: wi, dayIdx: di };
+    }
+    return null;
+  }
+
+
+
+  // animated scroll helper: smoothly tween scrollLeft to target over duration (ms)
+  function animateScrollTo(target, duration = 320) {
+    const el = scrollRef.current;
+    if (!el) return Promise.resolve();
+    const start = el.scrollLeft;
+    const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
+    const to = Math.max(0, Math.min(maxScroll, target));
+    if (Math.abs(to - start) < 1) {
+      el.scrollLeft = to;
+      return Promise.resolve();
+    }
+    const startTime = performance.now();
+    return new Promise(resolve => {
+      function step(now) {
+        const t = Math.min(1, (now - startTime) / duration);
+        // easeInOutQuad
+        const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+        el.scrollLeft = Math.round(start + (to - start) * eased);
+        if (t < 1) requestAnimationFrame(step);
+        else resolve();
+      }
+      requestAnimationFrame(step);
+    });
+  }
+
+  // ensureWeekVisible optionally animates and returns a Promise that resolves when done
+  function ensureWeekVisible(weekIdx, { smooth = false } = {}) {
+    const el = scrollRef.current;
+    if (!el) return Promise.resolve();
+    const left = weekIdx * COLUMN_STEP;
+    const centerOffset = Math.floor(el.clientWidth / 2) - Math.floor(COLUMN_STEP / 2);
+    const target = Math.max(0, left - centerOffset);
+    const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
+    const clamped = Math.max(0, Math.min(maxScroll, target));
+    if (smooth) return animateScrollTo(clamped);
+    el.scrollLeft = clamped;
+    return Promise.resolve();
+  }
+
+  async function moveFocusTo(weekIdx, dayIdx, { smooth = true } = {}) {
+    const week = weeks[weekIdx];
+    if (!week) return;
+    const date = week[dayIdx]?.date;
+    if (!date) return;
+    await ensureWeekVisible(weekIdx, { smooth });
+    const el = containerRef.current?.querySelector(`[data-date="${date}"]`);
+    if (el && typeof el.focus === 'function') {
+      el.focus();
+    }
+  }
+
+  async function handleKeyDown(e, date) {
+    const pos = findDatePosition(date);
+    if (!pos) return;
+    const { weekIdx, dayIdx } = pos;
+    let target = null;
+    if (e.key === 'ArrowRight') {
+      // move to next day, wrapping to next week
+      if (dayIdx < 6) target = { weekIdx, dayIdx: dayIdx + 1 };
+      else target = { weekIdx: weekIdx + 1, dayIdx: 0 };
+    } else if (e.key === 'ArrowLeft') {
+      if (dayIdx > 0) target = { weekIdx, dayIdx: dayIdx - 1 };
+      else target = { weekIdx: weekIdx - 1, dayIdx: 6 };
+    } else if (e.key === 'ArrowDown') {
+      // move one week forward
+      target = { weekIdx: weekIdx + 1, dayIdx };
+    } else if (e.key === 'ArrowUp') {
+      target = { weekIdx: weekIdx - 1, dayIdx };
+    }
+    // handle Home/End/PageUp/PageDown
+    if (e.key === 'Home') {
+      e.preventDefault();
+      target = { weekIdx: 0, dayIdx: 0 };
+      await moveFocusTo(0, 0, { smooth: true });
+      return;
+    }
+    if (e.key === 'End') {
+      e.preventDefault();
+      const lastWeek = weeks.length - 1;
+      const lastDay = Math.max(0, weeks[lastWeek].length - 1);
+      await moveFocusTo(lastWeek, lastDay, { smooth: true });
+      return;
+    }
+    if (e.key === 'PageUp' || e.key === 'PageDown') {
+      e.preventDefault();
+      const el = scrollRef.current;
+      if (!el) return;
+      const visibleCols = Math.max(1, Math.floor(el.clientWidth / COLUMN_STEP));
+      const delta = Math.max(1, visibleCols - 1);
+      if (e.key === 'PageUp') target = { weekIdx: weekIdx - delta, dayIdx };
+      else target = { weekIdx: weekIdx + delta, dayIdx };
+    }
+
+    if (target) {
+      e.preventDefault();
+      // clamp
+      const w = Math.max(0, Math.min(weeks.length - 1, target.weekIdx));
+      const d = Math.max(0, Math.min(6, target.dayIdx));
+      await moveFocusTo(w, d, { smooth: true });
+    }
+  }
+
   // During tests, the scrollRef dimensions may be zero; render all weeks so tests can query day cells.
   React.useEffect(() => {
     if (process.env.NODE_ENV === 'test') {
@@ -317,13 +448,13 @@ export default function Heatmap({ daily = [], isDarkMode = true }) {
   }, []);
 
   return (
-    <div ref={containerRef} className="p-3 rounded-lg bg-gray-800/30 relative w-full overflow-auto">
+    <div ref={containerRef} className="p-2 rounded-lg bg-gray-800/30 relative w-full overflow-auto">
         {/* auto-hide scrollbar styles (webkit + firefox) */}
         <style>{`
           .heatmap-scroll::-webkit-scrollbar { display: none; }
           .heatmap-scroll { -ms-overflow-style: none; scrollbar-width: none; }
         `}</style>
-  <div className="text-sm font-semibold mb-2" onDoubleClick={() => setShowDebug(s => !s)} title="Double-click to toggle debug overlay">Contributions (last 12 months)</div>
+  <div className="text-sm font-semibold mb-1" onDoubleClick={() => setShowDebug(s => !s)} title="Double-click to toggle debug overlay">Contributions (last 12 months)</div>
       <div className="flex gap-1">
         {/* weekday labels */}
         <div className="flex-col gap-1 mr-2 hidden sm:flex">
@@ -333,32 +464,19 @@ export default function Heatmap({ daily = [], isDarkMode = true }) {
         </div>
 
         {/* weeks container - allow horizontal scroll inside the parent when many weeks */}
-          {/* month labels */}
-          <div className="mb-1 w-full overflow-hidden">
-            <div style={{ display: 'flex', gap: 6, minWidth: 'max-content', alignItems: 'center' }}>
-              {(() => {
-                // monthStarts maps weekIndex -> month short name
-                const labelMap = {};
-                Object.entries(monthStarts).forEach(([wi, name]) => {
-                  labelMap[Number(wi)] = name;
-                });
-
-                return weeks.map((week, wi) => (
-                  <div key={wi} style={{ minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', width: 14 }}>
-                    {labelMap[wi] ? <div style={{ width: 2, height: 8, background: 'rgba(156,163,175,0.7)', borderRadius: 1, marginBottom: 2 }} /> : <div style={{ height: 8 }} />}
-                    {labelMap[wi] ? (() => {
-                      // build Date from the week's day that matches the month-start
-                      const label = labelMap[wi];
-                      // find the corresponding date object to determine whether to include year
-                      const monthDate = week.find(d => d.date.endsWith('-01'))?.dateObj;
-                      const text = monthDate ? formatMonthLabel(monthDate, undefined, monthDate.getUTCMonth() === 0) : label;
-                      return <div className="text-xs text-gray-400" style={{ textAlign: 'center', fontSize: 11 }}>{text}</div>;
-                    })() : <div style={{ height: 12 }} />}
-                  </div>
-                ));
-              })()}
-            </div>
-          </div>
+            {/* month labels */}
+            {showMonthLabels && (
+              <div className="mb-1 w-full overflow-hidden">
+                <div style={{ display: 'flex', gap: GAP, minWidth: 'max-content', alignItems: 'center' }}>
+                  {weeks.map((week, wi) => (
+                    <div key={wi} style={{ minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', width: SQUARE_SIZE }}>
+                      {monthLabelMap[wi] ? <div style={{ width: 2, height: 8, background: 'rgba(156,163,175,0.7)', borderRadius: 1, marginBottom: 2 }} /> : <div style={{ height: 8 }} />}
+                      {monthLabelMap[wi] ? <div className="text-xs text-gray-400" style={{ textAlign: 'center', fontSize: 11 }}>{monthLabelMap[wi].label}</div> : <div style={{ height: 12 }} />}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
           {/* weeks container - allow horizontal scroll inside the parent when many weeks */}
           <div
@@ -390,17 +508,19 @@ export default function Heatmap({ daily = [], isDarkMode = true }) {
                     return (
                       <div
                         key={date}
+                        data-date={date}
                         onClick={() => within && handleSelect(date)}
                         onMouseEnter={(e) => within && onEnter(e, date)}
                         onMouseMove={(e) => within && handleSquareMouseMove(e, date)}
                         onMouseLeave={onLeave}
-                        onFocus={(e) => within && onEnter(e, date)}
-                        onBlur={onLeave}
+                        onFocus={(e) => { if (within) { onEnter(e, date); focusedDateRef.current = date; }}}
+                        onBlur={(e) => { onLeave(); focusedDateRef.current = null; }}
                         tabIndex={within ? 0 : -1}
+                        onKeyDown={(e) => within && handleKeyDown(e, date)}
                         role="button"
                         aria-label={`${date}: ${count} contributions`}
                         aria-describedby={hover && hover.date === date ? tooltipIdRef.current : undefined}
-                        style={{ width: SQUARE_SIZE, height: SQUARE_SIZE, backgroundColor: bg, borderRadius: 4, cursor: within ? 'pointer' : 'default', boxSizing: 'border-box', outline: isToday ? '2px solid rgba(59,130,246,0.9)' : 'none' }}
+                style={{ width: SQUARE_SIZE, height: SQUARE_SIZE, backgroundColor: bg, borderRadius: compact ? 2 : 4, cursor: within ? 'pointer' : 'default', boxSizing: 'border-box', outline: isToday ? '2px solid rgba(59,130,246,0.9)' : 'none' }}
                         title={`${date}: ${count}`}
                       />
                     );

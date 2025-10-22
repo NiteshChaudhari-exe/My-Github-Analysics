@@ -42,6 +42,15 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [progress, setProgress] = useState({ completed: 0, total: 0 });
   const [activeTab, setActiveTab] = useState('overview');
+  const [heatmapCompact, setHeatmapCompact] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('heatmap.compact') || 'false'); } catch (e) { return false; }
+  });
+  const [showMonthLabels, setShowMonthLabels] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('heatmap.showMonthLabels') || 'false'); } catch (e) { return false; }
+  });
+  const [paletteName, setPaletteName] = useState(() => {
+    try { return localStorage.getItem('heatmap.palette') || 'default'; } catch (e) { return 'default'; }
+  });
   const overviewBtnRef = useRef(null);
   const reposBtnRef = useRef(null);
 
@@ -434,7 +443,24 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
         <main className="grid grid-cols-1 lg:grid-cols-1 gap-4 items-start">
           <div className="w-full">
             <div className={`${isDarkMode ? 'bg-gray-900/60 border-gray-700' : 'bg-white/80 border-gray-200'} p-3 sm:p-4 rounded-2xl border-2 shadow-sm h-96 mb-4`}> 
-              <Heatmap daily={contribDays} isDarkMode={isDarkMode} />
+              <div className="flex items-center justify-end mb-2 gap-3">
+                <label className="flex items-center gap-2 text-xs text-gray-300">
+                  <input type="checkbox" checked={heatmapCompact} onChange={(e) => { setHeatmapCompact(e.target.checked); try { localStorage.setItem('heatmap.compact', JSON.stringify(e.target.checked)); } catch (err) {} }} />
+                  Compact
+                </label>
+                <label className="flex items-center gap-2 text-xs text-gray-300">
+                  <input type="checkbox" checked={showMonthLabels} onChange={(e) => { setShowMonthLabels(e.target.checked); try { localStorage.setItem('heatmap.showMonthLabels', JSON.stringify(e.target.checked)); } catch (err) {} }} />
+                  Month labels
+                </label>
+                <label className="flex items-center gap-2 text-xs text-gray-300">
+                  <select value={paletteName} onChange={(e) => { setPaletteName(e.target.value); try { localStorage.setItem('heatmap.palette', e.target.value); } catch (err) {} }} className="bg-transparent text-xs">
+                    <option value="default">Default</option>
+                    <option value="warm">Warm</option>
+                    <option value="blue">Blue</option>
+                  </select>
+                </label>
+              </div>
+              <Heatmap daily={contribDays} isDarkMode={isDarkMode} compact={heatmapCompact} showMonthLabels={showMonthLabels} />
             </div>
             {/* Language Pie Chart below heatmap */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -525,7 +551,6 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
             </div>
           </div>
         )}
-        {activeRepo && <RepoModal repo={activeRepo} onClose={() => setActiveRepo(null)} />}
           </div>
         </div>
       )}
@@ -557,11 +582,12 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
               </select>
             </div>
           </div>
-          <RepoList repos={filteredRepos} onOpenRepo={(r) => setActiveRepo(r)} />
+          <RepoList repos={filteredRepos} onOpenRepo={(r) => { setActiveTab('repositories'); try { reposBtnRef.current?.focus(); } catch (e) {} ; setActiveRepo(r); }} />
         </div>
       </div>
       )}
     </div>
+      {activeRepo && <RepoModal repo={activeRepo} onClose={() => setActiveRepo(null)} />}
       {error && <ErrorNotification message={error} onDismiss={() => setError(null)} />}
     </ErrorBoundary>
   );

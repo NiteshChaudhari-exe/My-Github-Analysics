@@ -39,22 +39,7 @@ export function generateWeeks({ today: maybeToday, days = 364 } = {}) {
   return { today, startDate, startMonday, weeks };
 }
 
-// Build mapping of weekIndex -> short month name for the week that contains YYYY-MM-01
-export function buildMonthLabelMap(startDate, today, weeks, locale = undefined) {
-  const map = {};
-  const months = [];
-  const mCursor = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), 1));
-  while (mCursor <= today) {
-    months.push(new Date(mCursor));
-    mCursor.setUTCMonth(mCursor.getUTCMonth() + 1);
-  }
-  months.forEach(dt => {
-    const key = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,'0')}-01`;
-    const wi = weeks.findIndex(week => week.some(d => d.date === key));
-    if (wi >= 0) map[wi] = dt.toLocaleString(locale, { month: 'short' });
-  });
-  return map;
-}
+// (month label helpers removed — month labels are handled in UI where needed)
 
 // Simple clamp utility for scrolling bounds
 export function clamp(val, min, max) {
@@ -70,9 +55,4 @@ export const FLING = {
 };
 
 // Format month label: include year when month is January or when requested
-export function formatMonthLabel(dateObj, locale = undefined, includeYear = false) {
-  const month = dateObj.toLocaleString(locale, { month: 'short' });
-  const year = dateObj.getUTCFullYear();
-  if (includeYear || dateObj.getUTCMonth() === 0) return `${month} ${year}`;
-  return month;
-}
+// formatMonthLabel removed
