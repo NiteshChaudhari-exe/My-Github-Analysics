@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Activity, GitBranch, Code, TrendingUp, Users, Star, GitCommit, Moon, Coffee, AlertCircle, FileJson, FileSpreadsheet, FileText } from 'lucide-react';
 import { fetchGitHub, fetchRepoLanguages, batchFetch, fetchGraphQL, fetchAllPagesREST, checkRateLimit } from './githubApi';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -41,6 +41,9 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
   const [monthlySeries, setMonthlySeries] = useState([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [progress, setProgress] = useState({ completed: 0, total: 0 });
+  const [activeTab, setActiveTab] = useState('overview');
+  const overviewBtnRef = useRef(null);
+  const reposBtnRef = useRef(null);
 
   // Repository filtering and sorting
   const {
@@ -377,128 +380,120 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
         </div>
       </div>
 
-      {/* Only Overview Tab */}
-      <div className="flex gap-1 mb-6 sm:mb-8 bg-gray-800/50 p-1 rounded-xl w-full overflow-x-auto backdrop-blur-sm">
+      {/* Simple Tabs: Overview + Repositories */}
+      <div
+        className="flex gap-1 mb-6 sm:mb-8 bg-gray-800/50 p-1 rounded-xl w-full overflow-x-auto backdrop-blur-sm"
+        role="tablist"
+        aria-label="Main tabs"
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+            e.preventDefault();
+            setActiveTab(prev => {
+              if (e.key === 'ArrowRight') return prev === 'overview' ? 'repositories' : 'overview';
+              return prev === 'repositories' ? 'overview' : 'repositories';
+            });
+          }
+        }}
+      >
         <button
-          className={`px-3 sm:px-6 py-2 sm:py-3 rounded-lg capitalize font-medium transition-all duration-300 whitespace-nowrap flex-shrink-0 bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg`}
+          ref={overviewBtnRef}
+          role="tab"
+          aria-selected={activeTab === 'overview'}
+          onClick={() => setActiveTab('overview')}
+          className={`${activeTab === 'overview' ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg' : 'bg-gray-700 text-gray-200 hover:bg-gray-600'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg capitalize font-medium transition-all duration-300 whitespace-nowrap flex-shrink-0`}
         >
           Overview
         </button>
+        <button
+          ref={reposBtnRef}
+          role="tab"
+          aria-selected={activeTab === 'repositories'}
+          onClick={() => setActiveTab('repositories')}
+          className={`${activeTab === 'repositories' ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg' : 'bg-gray-700 text-gray-200 hover:bg-gray-600'} px-3 sm:px-6 py-2 sm:py-3 rounded-lg capitalize font-medium transition-all duration-300 whitespace-nowrap flex-shrink-0 relative`}
+        >
+          Repositories
+          <span className="ml-2 inline-flex items-center justify-center w-5 h-5 text-xs rounded-full bg-white/10 text-white" aria-hidden>{repos.length}</span>
+        </button>
       </div>
       
-      {/* Stats Grid */}
-  <div className={`${isDarkMode ? 'border-gray-700' : 'border-gray-200'} grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-4 sm:gap-6 border-2 rounded-2xl shadow-sm p-3`}>
+      {/* Overview content (stats, charts, repo list + heatmap) */}
+      {activeTab === 'overview' && (
+        <div className="transition-opacity duration-300 ease-in-out" role="tabpanel" aria-hidden={activeTab !== 'overview'}>
+          <div className={`${isDarkMode ? 'border-gray-700' : 'border-gray-200'} grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-4 sm:gap-6 border-2 rounded-2xl shadow-sm p-3`}>
           <StatCard icon={GitCommit} title="Total Commits" value={animatedStats.commits} color="from-green-500 to-emerald-600" />
           <StatCard icon={GitBranch} title="Repositories" value={animatedStats.repos} color="from-blue-500 to-cyan-600" />
           <StatCard icon={TrendingUp} title="Contributions" value={animatedStats.contributions} color="from-purple-500 to-pink-600" />
           <StatCard icon={Users} title="Followers" value={animatedStats.followers} color="from-orange-500 to-red-600" />
           <StatCard icon={Star} title="Pull Requests" value={animatedStats.pullRequests} color="from-indigo-500 to-purple-600" />
           <StatCard icon={Code} title="Code Reviews" value={animatedStats.codeReviews} color="from-yellow-500 to-orange-600" />
-        </div>
-
-
-      {/* Overview Content */}
-      <div className="space-y-6 sm:space-y-8">
-        {/* Repo list + Heatmap (side-by-side on large screens) - now inside a single main container */}
-        <main className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-          <div className="lg:col-span-1 h-full">
-            <div className="flex flex-col sm:flex-row sm:items-stretch sm:gap-4 h-full">
-              {/* RepoList: on small screens place after Heatmap, keep left on large screens */}
-             
-                <div className={`${isDarkMode ? 'bg-gray-900/60 border-gray-700' : 'bg-white/80 border-gray-200'} p-3 sm:p-2 rounded-2xl border-2 shadow-sm h-75`}>
-                  <div className="mb-3">
-                    <RepoSearch onSearch={term => setSearchTerm(term)} className="mb-2" />
-                    <div className="flex gap-2">
-                      <select
-                        value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value)}
-                        className={`${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'} rounded-lg px-2 py-1 text-sm`}
-                      >
-                        <option value="stars">Stars</option>
-                        <option value="name">Name</option>
-                      </select>
-                      <select
-                        value={filterLanguage}
-                        onChange={(e) => setFilterLanguage(e.target.value)}
-                        className={`${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'} rounded-lg px-2 py-1 text-sm`}
-                      >
-                        <option value="">All Languages</option>
-                        {languages.map(lang => (
-                          <option key={lang} value={lang}>{lang}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  <RepoList repos={filteredRepos} onOpenRepo={(r) => setActiveRepo(r)} />
-                </div>
-             
-            </div>
           </div>
-          <div className="lg:col-span-2 order-first lg:order-last">
-            {/* Heatmap moved here from the left column; make it order-first on small screens */}
-            <div className={`${isDarkMode ? 'bg-gray-900/60 border-gray-700' : 'bg-white/80 border-gray-200'} p-3 sm:p-4 rounded-2xl border-2 shadow-sm h-80 mb-4`}> 
+
+          {/* Overview Content */}
+          <div className="space-y-6 sm:space-y-8">
+        {/* Repo list + Heatmap (side-by-side on large screens) - now inside a single main container */}
+        <main className="grid grid-cols-1 lg:grid-cols-1 gap-4 items-start">
+          <div className="w-full">
+            <div className={`${isDarkMode ? 'bg-gray-900/60 border-gray-700' : 'bg-white/80 border-gray-200'} p-3 sm:p-4 rounded-2xl border-2 shadow-sm h-96 mb-4`}> 
               <Heatmap daily={contribDays} isDarkMode={isDarkMode} />
             </div>
-            {/* Language Pie Chart */}
-          </div>
-        </main>
-
-        {/* Arrange charts and tech stack side-by-side on large screens */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
-            <div className={`${isDarkMode ? 'bg-gradient-to-br from-gray-900 to-gray-800 border-gray-700' : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'} p-4 sm:p-6 rounded-2xl border-2 shadow-sm h-full`}>
-              <h3 className={`text-lg sm:text-xl font-bold mb-4 sm:mb-6 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Monthly Activity</h3>
-              <TimeSeriesCharts series={monthlySeries} />
-            </div>
-          </div>
-          <div className="lg:col-span-1">
-            <div className={`${isDarkMode ? 'bg-gradient-to-br from-gray-900 to-gray-800 border-gray-700' : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'} p-4 sm:p-6 rounded-2xl border-2 shadow-sm h-full`}>
-              <h3 className={`text-lg sm:text-xl font-bold mb-4 sm:mb-6 flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                <Code className="w-5 h-5 text-purple-400" />
-                Technology Stack
-              </h3>
-              <ResponsiveContainer width="100%" height={200}>
-                <PieChart>
-                  <Pie
-                    data={languageData}
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={70}
-                    dataKey="value"
-                    stroke="none"
-                  >
-                    {languageData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
+            {/* Language Pie Chart below heatmap */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="lg:col-span-2">
+                <div className={`${isDarkMode ? 'bg-gradient-to-br from-gray-900 to-gray-800 border-gray-700' : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'} p-4 sm:p-6 rounded-2xl border-2 shadow-sm h-full`}>
+                  <h3 className={`text-lg sm:text-xl font-bold mb-4 sm:mb-6 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Monthly Activity</h3>
+                  <TimeSeriesCharts series={monthlySeries} />
+                </div>
+              </div>
+              <div className="lg:col-span-1">
+                <div className={`${isDarkMode ? 'bg-gradient-to-br from-gray-900 to-gray-800 border-gray-700' : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'} p-4 sm:p-6 rounded-2xl border-2 shadow-sm h-full`}>
+                  <h3 className={`text-lg sm:text-xl font-bold mb-4 sm:mb-6 flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                    <Code className="w-5 h-5 text-purple-400" />
+                    Technology Stack
+                  </h3>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <PieChart>
+                      <Pie
+                        data={languageData}
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={70}
+                        dataKey="value"
+                        stroke="none"
+                      >
+                        {languageData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: isDarkMode ? '#1f2937' : '#ffffff', 
+                          border: `1px solid ${isDarkMode ? '#374151' : '#e5e7eb'}`,
+                          borderRadius: '12px',
+                          color: isDarkMode ? '#ffffff' : '#000000'
+                        }} 
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4">
+                    {languageData.map((lang) => (
+                      <div key={lang.name} className={`${isDarkMode ? 'bg-gray-700/30 border-gray-600' : 'bg-white/80 border-gray-200'} flex items-center justify-between p-2 rounded-lg border`}>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: lang.color }}></div>
+                          <span className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{lang.name}</span>
+                        </div>
+                        <span className={`text-sm font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{lang.value}%</span>
+                      </div>
                     ))}
-                  </Pie>
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: isDarkMode ? '#1f2937' : '#ffffff', 
-                      border: `1px solid ${isDarkMode ? '#374151' : '#e5e7eb'}`,
-                      borderRadius: '12px',
-                      color: isDarkMode ? '#ffffff' : '#000000'
-                    }} 
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4">
-                {languageData.map((lang) => (
-                  <div key={lang.name} className={`${isDarkMode ? 'bg-gray-700/30 border-gray-600' : 'bg-white/80 border-gray-200'} flex items-center justify-between p-2 rounded-lg border`}>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: lang.color }}></div>
-                      <span className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{lang.name}</span>
-                    </div>
-                    <span className={`text-sm font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{lang.value}%</span>
                   </div>
-                ))}
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        </main>
 
-        {/* (Duplicate Technology Stack removed; chart is shown above with the repo list) */}
+        {/* (Duplicate Technology Stack removed; chart is shown above) */}
 
-        {/* Export Buttons */}
+  {/* Export Buttons */}
         <div className="flex items-center gap-4 flex-wrap">
           <button 
             onClick={() => exportData('json')}
@@ -531,7 +526,41 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
           </div>
         )}
         {activeRepo && <RepoModal repo={activeRepo} onClose={() => setActiveRepo(null)} />}
+          </div>
+        </div>
+      )}
+
+      {/* Repositories view: focused Repo Search + RepoList */}
+      {activeTab === 'repositories' && (
+        <div className="transition-opacity duration-300 ease-in-out" role="tabpanel" aria-hidden={activeTab !== 'repositories'}>
+          <div className={`${isDarkMode ? 'bg-gray-900/60 border-gray-700' : 'bg-white/80 border-gray-200'} p-3 sm:p-4 rounded-2xl border-2 shadow-sm`}> 
+          <div className="mb-3">
+            <RepoSearch onSearch={term => setSearchTerm(term)} className="mb-2" />
+            <div className="flex gap-2 mb-2">
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className={`${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'} rounded-lg px-2 py-1 text-sm`}
+              >
+                <option value="stars">Stars</option>
+                <option value="name">Name</option>
+              </select>
+              <select
+                value={filterLanguage}
+                onChange={(e) => setFilterLanguage(e.target.value)}
+                className={`${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'} rounded-lg px-2 py-1 text-sm`}
+              >
+                <option value="">All Languages</option>
+                {languages.map(lang => (
+                  <option key={lang} value={lang}>{lang}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <RepoList repos={filteredRepos} onOpenRepo={(r) => setActiveRepo(r)} />
+        </div>
       </div>
+      )}
     </div>
       {error && <ErrorNotification message={error} onDismiss={() => setError(null)} />}
     </ErrorBoundary>
