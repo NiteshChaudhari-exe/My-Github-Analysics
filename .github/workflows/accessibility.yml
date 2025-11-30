@@ -1,0 +1,32 @@
+name: Accessibility checks (Pa11y)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  pa11y:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Start static server
+        run: npx serve -s build -l 5000 &
+      - name: Wait for server
+        run: |
+          for i in {1..15}; do
+            if curl -sSf http://localhost:5000 >/dev/null; then echo 'server up' && break; fi
+            echo 'waiting...'; sleep 1;
+          done
+      - name: Run Pa11y accessibility check
+        # Pa11y will exit with non-zero when problems are found
+        run: npx pa11y http://localhost:5000 --wait 1000 --timeout 20000

@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Activity, GitBranch, Code, TrendingUp, Users, Star, GitCommit, Moon, Coffee, AlertCircle, FileJson, FileSpreadsheet, FileText } from 'lucide-react';
-import { fetchGitHub, fetchRepoLanguages, batchFetch, fetchGraphQL, fetchAllPagesREST, checkRateLimit } from './githubApi';
+import { Activity, GitBranch, Code, TrendingUp, Users, Star, GitCommit, Moon, Coffee, AlertCircle } from 'lucide-react';
+import { fetchGitHub, fetchRepoLanguages, batchFetch, fetchGraphQL, fetchAllPagesREST, checkRateLimit, getToken } from './githubApi';
+import Login from './components/Login';
 import ErrorBoundary from './components/ErrorBoundary';
+import ConsentBanner from './components/ConsentBanner';
+import analytics from './utils/analytics';
+import PrivacyPreferences from './components/PrivacyPreferences';
 import RepoSearch, { useRepoFilters } from './components/RepoSearch';
-import { exportDataAsJSON, exportDataAsCSV, generateReport } from './utils/export';
 import TimeSeriesCharts from './components/TimeSeriesCharts';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import RepoList from './components/RepoList';
@@ -23,6 +26,9 @@ const ErrorNotification = ({ message, onDismiss }) => (
 );
 
 const EnhancedDeveloperAnalyticsDashboard = () => {
+  const [hasToken, setHasToken] = useState(false);
+  const [route, setRoute] = useState(() => (typeof window !== 'undefined' ? window.location.pathname : '/'));
+  const [authChecking, setAuthChecking] = useState(true);
   const [error, setError] = useState(null);
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [animatedStats, setAnimatedStats] = useState({
@@ -34,7 +40,7 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
     codeReviews: 0
   });
   const [languageData, setLanguageData] = useState([]);
-  const [commitData, setCommitData] = useState([]);
+  // commitData removed — preserved monthlySeries for charting
   const [repos, setRepos] = useState([]);
   const [activeRepo, setActiveRepo] = useState(null);
   const [contribDays, setContribDays] = useState([]);
@@ -66,6 +72,7 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
   } = useRepoFilters(repos);
 
   useEffect(() => {
+    if (!hasToken) return; // do not attempt API calls until token is present
     async function loadGitHubStats() {
       try {
         // Check rate limit before making requests
@@ -181,7 +188,7 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
           pullRequests: totalPRs,
           codeReviews: totalReviews
         });
-        setCommitData([]);
+  
         // 6. Fetch contributionsCollection for the last year (via GraphQL)
         try {
           const to = new Date();
@@ -315,34 +322,101 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
       }
     }
     loadGitHubStats();
+  }, [hasToken]);
+
+  // Check server-side cookie or client token on mount to determine initial auth state
+  useEffect(() => {
+    async function checkAuth() {
+      setAuthChecking(true);
+      try {
+        if (getToken()) {
+          setHasToken(true);
+          return;
+        }
+        const apiServer = (process.env.REACT_APP_API_SERVER && process.env.REACT_APP_API_SERVER.trim()) || `${window.location.protocol}//${window.location.hostname}:4000`;
+        const res = await fetch(`${apiServer.replace(/\/$/, '')}/api/github/user`, { credentials: 'include' });
+        if (res.ok) {
+          const json = await res.json().catch(() => ({}));
+          if (json && json.ok && json.user) {
+            setHasToken(true);
+          }
+        }
+      } catch (e) {
+        // ignore
+      } finally {
+        setAuthChecking(false);
+      }
+    }
+    checkAuth();
   }, []);
+
+  // simple client-side navigation helper to make Login a route (/login)
+  useEffect(() => {
+    const onPop = () => setRoute(window.location.pathname);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  function navigate(path, { replace = false } = {}) {
+    try {
+      if (replace) window.history.replaceState({}, '', path);
+      else window.history.pushState({}, '', path);
+    } catch (e) {}
+    setRoute(path);
+  }
+
+  async function handleLogout() {
+    try {
+      const apiServer = (process.env.REACT_APP_API_SERVER && process.env.REACT_APP_API_SERVER.trim()) || `${window.location.protocol}//${window.location.hostname}:4000`;
+      await fetch(`${apiServer.replace(/\/$/, '')}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
+    } catch (e) {
+      console.warn('logout failed', e);
+    }
+    setHasToken(false);
+    navigate('/login', { replace: true });
+  }
+
+  // keep route in sync with auth state: redirect to /login when unauthenticated, to / when authenticated
+  useEffect(() => {
+    try {
+      if (authChecking) return; // don't redirect while we are checking auth
+      if (!hasToken && route !== '/login') {
+        navigate('/login', { replace: true });
+      }
+      if (hasToken && route === '/login') {
+        navigate('/', { replace: true });
+      }
+    } catch (e) {}
+  }, [hasToken, route, authChecking]);
+
+  // If no token present, show the login page. The login page stores the token in localStorage.
+  // Show a splash while we check server-side auth
+  if (authChecking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-blue-50 p-6">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-600 mx-auto mb-4" />
+          <div className="text-gray-700">Checking authentication...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // If we've finished checking server-side auth and there is no token,
+  // render the Login page immediately to avoid flashing the main app UI.
+  if (!authChecking && !hasToken) {
+    return <Login onSaved={() => { setHasToken(true); navigate('/', { replace: true }); }} />;
+  }
+
+  // Route-based guard (kept for explicit routing behavior). If the route is
+  // '/login' and we're not in the middle of an auth check, render Login.
+  if (route === '/login' && !authChecking) {
+    return <Login onSaved={() => { setHasToken(true); navigate('/', { replace: true }); }} />;
+  }
 
   // monthlySeries is populated by the detailed GraphQL fetch inside loadGitHubStats
 
-  const exportData = (format) => {
-    const data = {
-      stats: animatedStats,
-      languages: languageData,
-      commits: commitData,
-      monthlySeries,
-      contribDays,
-      exportDate: new Date().toISOString()
-    };
-
-    switch (format) {
-      case 'json':
-        exportDataAsJSON(data);
-        break;
-      case 'csv':
-        exportDataAsCSV(data);
-        break;
-      case 'report':
-        generateReport(data);
-        break;
-      default:
-        console.error('Unsupported export format:', format);
-    }
-  };
+  // Export utilities removed; no export function available.
 
   const StatCard = ({ icon: Icon, title, value, color, subtitle }) => (
     <div className={`${isDarkMode ? 'bg-gradient-to-br from-gray-900 to-gray-800 border-gray-700 hover:border-gray-600' : 'bg-gradient-to-br from-white to-gray-50 border-gray-200 hover:border-gray-300'} p-4 sm:p-6 rounded-2xl border transition-all duration-300 hover:transform hover:scale-105 cursor-pointer`}>
@@ -360,6 +434,8 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
   return (
     <ErrorBoundary>
       <div className={`min-h-screen ${isDarkMode ? 'bg-gradient-to-br from-gray-950 via-gray-900 to-blue-950 text-white' : 'bg-gradient-to-br from-gray-50 via-white to-blue-50 text-gray-900'} p-3 sm:p-6`}>
+      {/* Skip link for keyboard users */}
+      <a href="#main-content" className="skip-link">Skip to main content</a>
       {/* Header */}
       <div className="mb-6 sm:mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -378,6 +454,7 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
             <button
               onClick={() => setIsDarkMode(!isDarkMode)}
               className={`p-2 rounded-lg transition-colors ${isDarkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'}`}
+              aria-pressed={isDarkMode}
             >
               {isDarkMode ? <Moon className="w-5 h-5" /> : <Coffee className="w-5 h-5" />}
             </button>
@@ -385,9 +462,33 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
               <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
               <span className="text-green-400 text-sm font-medium">Live</span>
             </div>
+            {hasToken && (
+              <button
+                onClick={handleLogout}
+                className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium transition-colors"
+                title="Logout from GitHub"
+              >
+                Logout
+              </button>
+            )}
+            {!hasToken && (
+              <button
+                onClick={() => navigate('/login', { replace: true })}
+                className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors"
+                title="Login to GitHub"
+              >
+                Login
+              </button>
+            )}
+            <div>
+              <PrivacyPreferences />
+            </div>
           </div>
         </div>
       </div>
+
+  {/* Consent banner (analytics) */}
+  <ConsentBanner />
 
       {/* Simple Tabs: Overview + Repositories */}
       <div
@@ -440,7 +541,7 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
           {/* Overview Content */}
           <div className="space-y-6 sm:space-y-8">
         {/* Repo list + Heatmap (side-by-side on large screens) - now inside a single main container */}
-        <main className="grid grid-cols-1 lg:grid-cols-1 gap-4 items-start">
+  <main id="main-content" className="grid grid-cols-1 lg:grid-cols-1 gap-4 items-start">
           <div className="w-full">
             <div className={`${isDarkMode ? 'bg-gray-900/60 border-gray-700' : 'bg-white/80 border-gray-200'} p-3 sm:p-4 rounded-2xl border-2 shadow-sm h-96 mb-4`}> 
               <div className="flex items-center justify-end mb-2 gap-3">
@@ -519,30 +620,7 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
 
         {/* (Duplicate Technology Stack removed; chart is shown above) */}
 
-  {/* Export Buttons */}
-        <div className="flex items-center gap-4 flex-wrap">
-          <button 
-            onClick={() => exportData('json')}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
-          >
-            <FileJson className="w-4 h-4" />
-            Export JSON
-          </button>
-          <button 
-            onClick={() => exportData('csv')}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            Export CSV
-          </button>
-          <button 
-            onClick={() => exportData('report')}
-            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
-          >
-            <FileText className="w-4 h-4" />
-            Generate Report
-          </button>
-        </div>
+        {/* Export functionality removed */}
         {loadingDetails && (
           <div className="mt-3 w-full">
             <div className="text-sm text-gray-300">Fetching detailed history... ({progress.completed}/{progress.total})</div>
@@ -560,7 +638,7 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
         <div className="transition-opacity duration-300 ease-in-out" role="tabpanel" aria-hidden={activeTab !== 'repositories'}>
           <div className={`${isDarkMode ? 'bg-gray-900/60 border-gray-700' : 'bg-white/80 border-gray-200'} p-3 sm:p-4 rounded-2xl border-2 shadow-sm`}> 
           <div className="mb-3">
-            <RepoSearch onSearch={term => setSearchTerm(term)} className="mb-2" />
+              <RepoSearch onSearch={term => setSearchTerm(term)} className="mb-2" />
             <div className="flex gap-2 mb-2">
               <select
                 value={sortBy}
@@ -582,7 +660,12 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
               </select>
             </div>
           </div>
-          <RepoList repos={filteredRepos} onOpenRepo={(r) => { setActiveTab('repositories'); try { reposBtnRef.current?.focus(); } catch (e) {} ; setActiveRepo(r); }} />
+          <RepoList repos={filteredRepos} onOpenRepo={(r) => {
+            try { analytics.trackEvent('repo_open', { repo: r.name, id: r.id }); } catch (e) {}
+            setActiveTab('repositories');
+            try { reposBtnRef.current?.focus(); } catch (e) {}
+            setActiveRepo(r);
+          }} />
         </div>
       </div>
       )}

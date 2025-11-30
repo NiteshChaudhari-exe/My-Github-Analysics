@@ -1,3 +1,46 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Accessibility helpers */
+.skip-link {
+	position: absolute;
+	left: -999px;
+	top: auto;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+}
+.skip-link:focus,
+.skip-link:active {
+	position: fixed;
+	left: 1rem;
+	top: 1rem;
+	width: auto;
+	height: auto;
+	padding: 0.5rem 0.75rem;
+	background: white;
+	color: black;
+	z-index: 9999;
+	border-radius: 6px;
+	box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+/* Visible focus for keyboard users - theme aware */
+[data-theme="light"] button:focus-visible,
+[data-theme="light"] a:focus-visible,
+[data-theme="light"] input:focus-visible,
+[data-theme="light"] select:focus-visible,
+[data-theme="light"] textarea:focus-visible {
+	outline: 3px solid rgba(37,99,235,0.95); /* blue-600 */
+	outline-offset: 2px;
+}
+
+[data-theme="dark"] button:focus-visible,
+[data-theme="dark"] a:focus-visible,
+[data-theme="dark"] input:focus-visible,
+[data-theme="dark"] select:focus-visible,
+[data-theme="dark"] textarea:focus-visible {
+	outline: 3px solid rgba(250,204,21,0.95); /* yellow-400 */
+	outline-offset: 2px;
+}

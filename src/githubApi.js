@@ -1,20 +1,40 @@
 const GITHUB_API_URL = 'https://api.github.com';
 const RATE_LIMIT_THRESHOLD = 50; // Warn when fewer than 50 requests remaining
 
+function apiServerBase() {
+  if (typeof window === 'undefined') return null;
+  return (process.env.REACT_APP_API_SERVER && process.env.REACT_APP_API_SERVER.trim()) || `${window.location.protocol}//${window.location.hostname}:4000`;
+}
+
 function cacheKeyFor(prefix, key) {
   return `gh_cache:${prefix}:${btoa(unescape(encodeURIComponent(key))).slice(0, 120)}`;
 }
 
-async function validateGitHubToken() {
-  const token = process.env.REACT_APP_GITHUB_TOKEN;
-  if (!token) {
-    throw new Error('GitHub token not found. Please set REACT_APP_GITHUB_TOKEN environment variable.');
+// Read token at runtime: prefer localStorage (set by Login), fallback to build-time env var
+export function getToken() {
+  try {
+    const t = typeof window !== 'undefined' ? window.localStorage.getItem('github.token') : null;
+    if (t) return t;
+  } catch (e) {
+    // ignore localStorage errors
   }
-  return token;
+  return process.env.REACT_APP_GITHUB_TOKEN || null;
 }
 
 export async function checkRateLimit() {
-  const token = await validateGitHubToken();
+  // If a client-side token is available, check GitHub rate limit directly.
+  // If no client token is present (server-managed httpOnly cookie flow),
+  // avoid throwing here — the server will enforce rate limits for proxied requests.
+  const token = (function() {
+    try { return getToken(); } catch (e) { return null; }
+  })();
+
+  if (!token) {
+    // No client token: return a high remaining allowance so the app does not warn
+    // or attempt direct GitHub calls. Server proxy will handle real limits.
+    return { remaining: Number.MAX_SAFE_INTEGER, reset: Math.floor(Date.now() / 1000) + 3600 };
+  }
+
   const res = await fetch(`${GITHUB_API_URL}/rate_limit`, {
     headers: { Authorization: `token ${token}` }
   });
@@ -50,8 +70,9 @@ async function handleResponse(res) {
 }
 
 export async function fetchGitHub(endpoint, { useCache = true, ttl = 60 } = {}) {
-  const token = process.env.REACT_APP_GITHUB_TOKEN;
+  const token = getToken();
   const url = `${GITHUB_API_URL}${endpoint}`;
+  const apiServer = apiServerBase();
 
   const key = cacheKeyFor('rest', url);
   if (useCache) {
@@ -66,19 +87,35 @@ export async function fetchGitHub(endpoint, { useCache = true, ttl = 60 } = {}) 
     }
   }
 
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `token ${token}`,
-      Accept: 'application/vnd.github.v3+json',
-    },
-  });
-
-  const json = await handleResponse(res);
-
-  if (useCache) {
-    try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: json })); } catch (e) { }
+  const headers = { Accept: 'application/vnd.github.v3+json' };
+  if (token) {
+    headers.Authorization = `token ${token}`;
+    const res = await fetch(url, { headers });
+    const json = await handleResponse(res);
+    if (useCache) {
+      try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: json })); } catch (e) { }
+    }
+    return json;
   }
-  return json;
+
+  // If no client token, proxy via server (httpOnly cookie)
+  if (!apiServer) throw new Error('No API server configured for proxy');
+  try {
+    const proxyRes = await fetch(`${apiServer.replace(/\/$/, '')}/api/github/rest?path=${encodeURIComponent(endpoint)}`, { credentials: 'include' });
+    const proxyJson = await proxyRes.json().catch(() => ({}));
+    const proxyResOk = typeof proxyRes.ok === 'boolean' ? proxyRes.ok : true;
+    const proxyJsonOk = proxyJson && typeof proxyJson.ok === 'boolean' ? proxyJson.ok : true;
+    if (!proxyResOk || !proxyJsonOk) {
+      throw new Error(proxyJson && proxyJson.error ? JSON.stringify(proxyJson.error) : `GitHub proxy error ${proxyRes.status}`);
+    }
+    const json = proxyJson.data;
+    if (useCache) {
+      try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: json })); } catch (e) { }
+    }
+    return json;
+  } catch (e) {
+    throw e;
+  }
 }
 
 // Fetch languages for a single repo: returns an object like {JavaScript: 12345, HTML: 234}
@@ -119,7 +156,7 @@ export async function batchFetch(items, worker, concurrency = 5) {
 
 // GraphQL fetch with caching and rate-limit handling
 export async function fetchGraphQL(query, variables = {}, { useCache = true, ttl = 120 } = {}) {
-  const token = process.env.REACT_APP_GITHUB_TOKEN;
+  const token = getToken();
   const key = cacheKeyFor('graphql', query + JSON.stringify(variables));
   if (useCache) {
     try {
@@ -131,30 +168,44 @@ export async function fetchGraphQL(query, variables = {}, { useCache = true, ttl
     } catch (e) { }
   }
 
-  const res = await fetch(`${GITHUB_API_URL}/graphql`, {
+  const apiServer = apiServerBase();
+
+  if (token) {
+    const headers = { 'Content-Type': 'application/json', Authorization: `bearer ${token}` };
+    const res = await fetch(`${GITHUB_API_URL}/graphql`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ query, variables }),
+    });
+    const json = await res.json();
+    if (json.errors) throw new Error(json.errors.map(e => e.message).join(', '));
+    if (useCache) {
+      try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: json.data })); } catch (e) { }
+    }
+    return json.data;
+  }
+
+  // Proxy GraphQL through server
+  if (!apiServer) throw new Error('No API server configured for proxy');
+  const proxyRes = await fetch(`${apiServer.replace(/\/$/, '')}/api/github/graphql`, {
     method: 'POST',
-    headers: {
-      Authorization: `bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query, variables }),
   });
-
-  const json = await res.json();
-  if (json.errors) {
-    // Check rate limit info in headers isn't available here, but surface errors
-    throw new Error(json.errors.map(e => e.message).join(', '));
-  }
-
+  const proxyJson = await proxyRes.json().catch(() => ({}));
+  const proxyResOk = typeof proxyRes.ok === 'boolean' ? proxyRes.ok : true;
+  const proxyJsonOk = proxyJson && typeof proxyJson.ok === 'boolean' ? proxyJson.ok : true;
+  if (!proxyResOk || !proxyJsonOk) throw new Error(proxyJson && proxyJson.error ? JSON.stringify(proxyJson.error) : `GraphQL proxy error ${proxyRes.status}`);
   if (useCache) {
-    try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: json.data })); } catch (e) { }
+    try { localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: proxyJson.data })); } catch (e) { }
   }
-  return json.data;
+  return proxyJson.data;
 }
 
 // Fetch all pages for a REST endpoint. If isSearch is true, the response shape is { items: [...] }
 export async function fetchAllPagesREST(path, { per_page = 100, maxPages = 10, isSearch = false, concurrency = 3 } = {}) {
-  const token = process.env.REACT_APP_GITHUB_TOKEN;
+  const token = getToken();
   const results = [];
 
   // build initial url (page=1)
@@ -173,30 +224,58 @@ export async function fetchAllPagesREST(path, { per_page = 100, maxPages = 10, i
 
   while (url && pageCount < maxPages) {
     pageCount += 1;
-    const res = await fetch(url, { headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' } });
-    if (!res.ok) {
-      console.warn(`fetchAllPagesREST: request failed ${res.status} ${url}`);
+
+    if (token) {
+      const headers = { Accept: 'application/vnd.github.v3+json', Authorization: `token ${token}` };
+      const res = await fetch(url, { headers });
+      if (!res.ok) {
+        console.warn(`fetchAllPagesREST: request failed ${res.status} ${url}`);
+        break;
+      }
+      const json = await res.json();
+      const items = isSearch ? (json.items || []) : (Array.isArray(json) ? json : []);
+      if (items.length === 0) break;
+      results.push(...items);
+
+      if (!isSearch && items.length < per_page) break;
+
+      const link = res.headers.get('link');
+      const links = parseLinkHeader(link);
+      if (links.next) {
+        url = links.next;
+        await new Promise(r => setTimeout(r, 200));
+        continue;
+      }
       break;
     }
 
-    const json = await res.json();
+    // proxy via server
+    const apiServer = apiServerBase();
+    if (!apiServer) throw new Error('No API server configured for proxy');
+    const pathQuery = url.replace(GITHUB_API_URL, '');
+    const proxyRes = await fetch(`${apiServer.replace(/\/$/, '')}/api/github/rest?path=${encodeURIComponent(pathQuery)}`, { credentials: 'include' });
+    const proxyJson = await proxyRes.json().catch(() => ({}));
+    const proxyResOk = typeof proxyRes.ok === 'boolean' ? proxyRes.ok : true;
+    const proxyJsonOk = proxyJson && typeof proxyJson.ok === 'boolean' ? proxyJson.ok : true;
+    if (!proxyResOk || !proxyJsonOk) {
+      console.warn(`fetchAllPagesREST proxy failed ${proxyRes.status} ${pathQuery}`);
+      break;
+    }
+    const json = proxyJson.data;
     const items = isSearch ? (json.items || []) : (Array.isArray(json) ? json : []);
     if (items.length === 0) break;
     results.push(...items);
 
-    // stop if fewer than per_page returned (last page)
     if (!isSearch && items.length < per_page) break;
 
-    // inspect Link header for next page
-    const link = res.headers.get('link');
+    const link = (proxyJson.headers && proxyJson.headers.link) || null;
     const links = parseLinkHeader(link);
     if (links.next) {
       url = links.next;
-      // small throttle to avoid hitting rate limits
       await new Promise(r => setTimeout(r, 200));
-    } else {
-      break;
+      continue;
     }
+    break;
   }
 
   return results;

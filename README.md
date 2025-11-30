@@ -66,6 +66,52 @@ Open http://localhost:3000 in your browser.
 - `npm run build` — build production assets
 - `npm test` — run tests
 
+## Analytics & Consent
+
+This project includes a small, consent-aware analytics wrapper and a consent banner component that prevents analytics from running until a user explicitly Accepts.
+
+- Consent storage key: `analytics.consent` in `localStorage` (`'true'` or `'false'`).
+- Analytics wrapper: `src/utils/analytics.js` — exposes `enable`, `disable`, `trackEvent`, `pageview`, `consentGiven`, and `setConsent`.
+- Consent banner: `src/components/ConsentBanner.js` — simple Accept / Decline UI. On Accept it calls `analytics.setConsent(true)`.
+
+Wiring a real provider (Google Analytics gtag):
+
+1. Add your Measurement ID to environment variables, e.g. in PowerShell before starting:
+
+```powershell
+$env:REACT_APP_GA_MEASUREMENT_ID='G-XXXXXXXX'; npm start
+```
+
+2. Update `ConsentBanner` to call `analytics.enable({ ga: process.env.REACT_APP_GA_MEASUREMENT_ID })` when the user accepts (I can do this change for you).
+
+How to verify locally:
+
+1. Start the app with `npm start`.
+2. Without accepting the banner, open DevTools -> Network/Console and confirm there are no `gtag` network requests and no analytics logs.
+3. Accept the banner and click a repo — the wrapper logs an analytics event in the console (`[analytics] event repo_open { repo: ..., id: ... }`).
+
+If you'd like, I can automatically enable GA on Accept using the `REACT_APP_GA_MEASUREMENT_ID` env var and add a CI-safe way to publish source maps or configure a real analytics provider.
+
+## Server-side consent and Manage Data
+
+This project includes a small demo server that provides server-side consent storage and simple data export/delete endpoints.
+
+- Start the server (after installing dependencies):
+
+```powershell
+npm install
+npm run start:server
+```
+
+- Endpoints:
+   - `GET /api/consent` — returns the consent record for the current anonymous cookie id.
+   - `POST /api/consent` — body: `{ "consent": true|false }` to set server-side consent for the current cookie id.
+   - `POST /api/data-request` — returns a JSON export of stored data for the current cookie id (demo only).
+   - `DELETE /api/data` — deletes stored data for the current cookie id (GDPR demo).
+
+The client `Privacy` popover includes a "Manage data on server" link which opens a small modal that calls these endpoints (export/delete).
+
+
 ---
 
 ## Troubleshooting
@@ -99,6 +145,42 @@ npm install file-saver jszip
    - Open DevTools (F12) and check the Console and Network tabs. Most API or JSON parse errors are visible there and indicate which request failed.
 
 ---
+
+## OAuth (httpOnly cookie server flow)
+
+This project now supports a server-side GitHub OAuth flow that stores the access token in an httpOnly cookie (the SPA never writes the token to localStorage). Use this flow to avoid exposing tokens to JavaScript in the browser.
+
+1. Register an OAuth App on GitHub: https://github.com/settings/developers -> OAuth Apps
+   - Set the Authorization callback URL to `http://localhost:4000/auth/github/callback` (or your `OAUTH_REDIRECT_URI`).
+
+2. Copy `.env.example` to `.env` (or set the environment variables) and fill in values:
+
+```
+GITHUB_CLIENT_ID=your_client_id
+GITHUB_CLIENT_SECRET=your_client_secret
+CLIENT_APP_URL=http://localhost:3000
+OAUTH_REDIRECT_URI=http://localhost:4000/auth/github/callback
+```
+
+3. Start the server (in a separate terminal):
+
+```powershell
+npm run start:server
+```
+
+4. Start the client app and open the Login page. Click "Login with GitHub (OAuth)" and complete the GitHub authorize flow. After successful auth the server will set an httpOnly cookie and redirect back to the client.
+
+5. The Login UI also supports entering a Personal Access Token (PAT) directly — but when you save a token via the UI it will be POSTed to the server and stored in an httpOnly cookie (the SPA will not keep the token in localStorage).
+
+Token scopes
+- The server requests the following scopes by default when initiating OAuth: `read:user repo` (see `server/index.js` -> the `scope` param in `/auth/github`).
+- If you need finer-grained scopes, edit `server/index.js` and change the `scope` string for the `/auth/github` redirect.
+- The Login UI shows the token's effective scopes (returned by GitHub as `x-oauth-scopes`) after validation.
+
+Security notes
+- The server stores the access token in an httpOnly cookie (`github_token`) to reduce exposure to XSS.
+- For production, set the cookie `secure: true` and consider SameSite policies, CSRF protections, and session management. You may also consider server-side session storage or a token store rather than cookies if you need token revocation or multi-server setups.
+
 
 ## Code structure (important files)
 
