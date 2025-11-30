@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { Activity, GitBranch, Code, TrendingUp, Users, Star, GitCommit, Moon, Coffee, AlertCircle } from 'lucide-react';
 import { fetchGitHub, fetchRepoLanguages, batchFetch, fetchGraphQL, fetchAllPagesREST, checkRateLimit, getToken } from './githubApi';
 import { getApiServerUrl } from './utils/apiServer.js';
@@ -673,6 +674,7 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
     </div>
       {activeRepo && <RepoModal repo={activeRepo} onClose={() => setActiveRepo(null)} />}
       {error && <ErrorNotification message={error} onDismiss={() => setError(null)} />}
+      <Analytics />
     </ErrorBoundary>
   );
 };
