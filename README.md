@@ -2,7 +2,7 @@
 
 A modern, feature-rich dashboard for developers to analyze GitHub activity, repositories, language usage, and contributions over time. Built with **React**, **Tailwind CSS**, and **Recharts**, this app fetches data from GitHub's REST and GraphQL APIs and provides interactive visualizations, export functionality, and privacy-focused data management.
 
-**Live Demo**: [Deploy to Vercel](https://my-github-analysics.vercel.app/)  
+**Live Demo**: [Deployed to Vercel](https://my-github-analysics.vercel.app/)  
 **GitHub Repo**: https://github.com/NiteshChaudhari-exe/My-Github-Analysics
 
 ---
