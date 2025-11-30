@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getApiServerUrl } from '../utils/apiServer.js';
 export default function Login({ onSaved } = {}) {
   const [token, setToken] = useState('');
   const [saved, setSaved] = useState(false);
@@ -28,7 +29,9 @@ export default function Login({ onSaved } = {}) {
     // Check if server already has a token (httpOnly cookie)
     async function checkAuth() {
       try {
-        const apiServer = (process.env.REACT_APP_API_SERVER && process.env.REACT_APP_API_SERVER.trim()) || `${window.location.protocol}//${window.location.hostname}:4000`;
+        const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+        const port = isProduction ? '' : ':4000';
+        const apiServer = (process.env.REACT_APP_API_SERVER && process.env.REACT_APP_API_SERVER.trim()) || `${window.location.protocol}//${window.location.hostname}${port}`;
         const res = await fetch(`${apiServer.replace(/\/$/, '')}/api/github/user`, { credentials: 'include' });
         if (res.ok) {
           const json = await res.json();
@@ -49,7 +52,7 @@ export default function Login({ onSaved } = {}) {
       } catch (e) {
         // Surface helpful error when server is unreachable (network/CORS)
         try {
-          const apiServer = (process.env.REACT_APP_API_SERVER && process.env.REACT_APP_API_SERVER.trim()) || `${window.location.protocol}//${window.location.hostname}:4000`;
+          const apiServer = getApiServerUrl();
           setError(`Network error: failed to reach auth server at ${apiServer}. Is the server running and CORS configured? (${e.message})`);
         } catch (err) {
           setError(`Network error: ${e.message}`);
@@ -64,7 +67,7 @@ export default function Login({ onSaved } = {}) {
     setUser(null);
     setLoading(true);
     try {
-      const apiServer = (process.env.REACT_APP_API_SERVER && process.env.REACT_APP_API_SERVER.trim()) || `${window.location.protocol}//${window.location.hostname}:4000`;
+      const apiServer = getApiServerUrl();
       const res = await fetch(`${apiServer.replace(/\/$/, '')}/auth/token/test`, {
         method: 'POST',
         credentials: 'include',
@@ -83,7 +86,7 @@ export default function Login({ onSaved } = {}) {
     } catch (e) {
       // network or CORS error when reaching the server
       try {
-        const apiServer = (process.env.REACT_APP_API_SERVER && process.env.REACT_APP_API_SERVER.trim()) || `${window.location.protocol}//${window.location.hostname}:4000`;
+        const apiServer = getApiServerUrl();
         setError(`Network error: failed to reach auth server at ${apiServer}. Is the server running and CORS configured? (${e.message})`);
       } catch (err) {
         setError(e.message || String(e));
@@ -102,7 +105,7 @@ export default function Login({ onSaved } = {}) {
     }
     setLoading(true);
     try {
-      const apiServer = (process.env.REACT_APP_API_SERVER && process.env.REACT_APP_API_SERVER.trim()) || `${window.location.protocol}//${window.location.hostname}:4000`;
+      const apiServer = getApiServerUrl();
       const res = await fetch(`${apiServer.replace(/\/$/, '')}/auth/token`, {
         method: 'POST',
         credentials: 'include',
@@ -120,7 +123,7 @@ export default function Login({ onSaved } = {}) {
       }
     } catch (e) {
       try {
-        const apiServer = (process.env.REACT_APP_API_SERVER && process.env.REACT_APP_API_SERVER.trim()) || `${window.location.protocol}//${window.location.hostname}:4000`;
+        const apiServer = getApiServerUrl();
         setError(`Network error: failed to reach auth server at ${apiServer}. Is the server running and CORS configured? (${e.message})`);
       } catch (err) {
         setError(e.message || String(e));
@@ -133,7 +136,7 @@ export default function Login({ onSaved } = {}) {
   function handleClear() {
     try {
       // ask server to clear cookie
-      const apiServer = (process.env.REACT_APP_API_SERVER && process.env.REACT_APP_API_SERVER.trim()) || `${window.location.protocol}//${window.location.hostname}:4000`;
+      const apiServer = getApiServerUrl();
       fetch(`${apiServer.replace(/\/$/, '')}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
       setToken('');
       setSaved(false);
@@ -224,7 +227,7 @@ export default function Login({ onSaved } = {}) {
           <button
             onClick={() => {
               setOauthLoading(true);
-              const apiServer = (process.env.REACT_APP_API_SERVER && process.env.REACT_APP_API_SERVER.trim()) || `${window.location.protocol}//${window.location.hostname}:4000`;
+              const apiServer = getApiServerUrl();
               const url = `${apiServer.replace(/\/$/, '')}/auth/github`;
               window.location.href = url;
             }}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Activity, GitBranch, Code, TrendingUp, Users, Star, GitCommit, Moon, Coffee, AlertCircle } from 'lucide-react';
 import { fetchGitHub, fetchRepoLanguages, batchFetch, fetchGraphQL, fetchAllPagesREST, checkRateLimit, getToken } from './githubApi';
+import { getApiServerUrl } from './utils/apiServer.js';
 import Login from './components/Login';
 import ErrorBoundary from './components/ErrorBoundary';
 import ConsentBanner from './components/ConsentBanner';
@@ -333,7 +334,7 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
           setHasToken(true);
           return;
         }
-        const apiServer = (process.env.REACT_APP_API_SERVER && process.env.REACT_APP_API_SERVER.trim()) || `${window.location.protocol}//${window.location.hostname}:4000`;
+        const apiServer = getApiServerUrl();
         const res = await fetch(`${apiServer.replace(/\/$/, '')}/api/github/user`, { credentials: 'include' });
         if (res.ok) {
           const json = await res.json().catch(() => ({}));
@@ -367,7 +368,7 @@ const EnhancedDeveloperAnalyticsDashboard = () => {
 
   async function handleLogout() {
     try {
-      const apiServer = (process.env.REACT_APP_API_SERVER && process.env.REACT_APP_API_SERVER.trim()) || `${window.location.protocol}//${window.location.hostname}:4000`;
+      const apiServer = getApiServerUrl();
       await fetch(`${apiServer.replace(/\/$/, '')}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
     } catch (e) {
       console.warn('logout failed', e);

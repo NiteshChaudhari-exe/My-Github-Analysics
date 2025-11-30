@@ -1,9 +1,10 @@
+import { getApiServerUrl } from './utils/apiServer.js';
+
 const GITHUB_API_URL = 'https://api.github.com';
 const RATE_LIMIT_THRESHOLD = 50; // Warn when fewer than 50 requests remaining
 
 function apiServerBase() {
-  if (typeof window === 'undefined') return null;
-  return (process.env.REACT_APP_API_SERVER && process.env.REACT_APP_API_SERVER.trim()) || `${window.location.protocol}//${window.location.hostname}:4000`;
+  return getApiServerUrl();
 }
 
 function cacheKeyFor(prefix, key) {

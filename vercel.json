@@ -1,0 +1,21 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "build",
+  "env": {
+    "REACT_APP_API_SERVER": "@react_app_api_server"
+  },
+  "routes": [
+    {
+      "src": "/api/.*",
+      "dest": "/server/index.js"
+    },
+    {
+      "src": "/auth/.*",
+      "dest": "/server/index.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ]
+}

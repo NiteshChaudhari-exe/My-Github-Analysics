@@ -1,207 +1,497 @@
-# GitHub Analytics Dashboard
+# 📊 GitHub Analytics Dashboard
 
-A modern, visually-rich dashboard for developers to analyze GitHub activity, repositories, language usage, and contributions. Built with React, Tailwind CSS and Recharts, this app fetches data from the GitHub REST and GraphQL APIs and provides charts, heatmaps and exports.
+A modern, feature-rich dashboard for developers to analyze GitHub activity, repositories, language usage, and contributions over time. Built with **React**, **Tailwind CSS**, and **Recharts**, this app fetches data from GitHub's REST and GraphQL APIs and provides interactive visualizations, export functionality, and privacy-focused data management.
 
----
-
-## Quick status (as of this edit)
-
-- The app compiles but there were several recent edits to improve error handling and exports.
-- You'll need a GitHub personal access token in `REACT_APP_GITHUB_TOKEN` to fetch private/owner data and avoid anonymous rate limits.
-- We added export helpers that require `file-saver` and `jszip` — these were installed with npm in this workspace.
+**Live Demo**: [Deploy to Vercel](https://my-github-analysics.vercel.app/)  
+**GitHub Repo**: https://github.com/NiteshChaudhari-exe/My-Github-Analysics
 
 ---
 
-## Features
+## 🎯 Features
 
-- Overview tiles (commits, repos, contributions, followers, PRs, code reviews)
-- Contribution heatmap (last 12 months)
-- Language breakdown (pie chart)
-- Monthly activity timeseries
-- Repository list with search/sort
-- Export: JSON / CSV (zipped) / Markdown report
-- Dark / Light theme toggle
+### Dashboard Analytics
+- **Overview Stats**: Total commits, repositories, contributions, followers, pull requests, code reviews
+- **Contribution Heatmap**: 12-month activity visualization with compact/label toggles
+- **Language Breakdown**: Pie chart showing language distribution across all repos
+- **Monthly Activity**: Time-series chart tracking commits and PRs by month
+- **Repository List**: Searchable, sortable repositories with star counts and languages
+- **Repository Details**: Modal view with detailed repo information
+
+### Authentication
+- **OAuth Login**: Secure GitHub OAuth flow with httpOnly cookie storage
+- **Personal Access Token**: Direct token entry for quick testing
+- **Auto-Detection**: Detects existing server-side authentication on load
+- **Scope Display**: Shows requested permissions before OAuth authorization
+- **Loading States**: Clear feedback during authentication processes
+
+### Data Management (GDPR-Compliant)
+- **Consent Banner**: User opt-in for analytics before data collection
+- **Data Export**: Download personal data as JSON
+- **Data Deletion**: Request right to be forgotten (GDPR compliance)
+- **Server-Side Storage**: Consent records stored securely server-side
+- **Privacy Preferences**: User control over analytics and data usage
+
+### Developer Experience
+- **Dark/Light Theme**: Toggle between theme preferences
+- **Responsive Design**: Works on desktop, tablet, and mobile
+- **Error Handling**: User-friendly error messages with troubleshooting hints
+- **Caching**: GraphQL and REST responses cached to reduce API calls
+- **Rate Limit Warnings**: Alert when approaching GitHub API limits
+- **Export Formats**: JSON, CSV (zipped), and markdown reports
 
 ---
 
-## Prerequisites
+## 🚀 Quick Start
 
-- Node.js 18+ (or recent LTS)
-- npm
-- A GitHub Personal Access Token (PAT) with at least the following scopes when fetching private data: `repo`, `read:user`. For public-only data you may omit `repo` but will be subject to public rate limits.
+### Prerequisites
 
-How to create a token:
-- Visit https://github.com/settings/tokens
-- Click "Generate new token (classic)" or a fine-grained token and grant the necessary scopes.
+- **Node.js** 18+ (or recent LTS)
+- **npm** 8+
+- **GitHub Account** (for authentication)
 
----
+### Installation
 
-## Setup
+```bash
+# Clone the repository
+git clone https://github.com/NiteshChaudhari-exe/My-Github-Analysics.git
+cd My-Github-Analysics
 
-1. Install dependencies
-
-```powershell
+# Install dependencies
 npm install
-```
 
-2. Create `.env` in the project root and add your token:
-
-```text
-REACT_APP_GITHUB_TOKEN=your_personal_access_token_here
-```
-
-3. Start the dev server
-
-```powershell
-npm start
-```
-
-Open http://localhost:3000 in your browser.
-
----
-
-## Available scripts
-
-- `npm start` — start the dev server (uses `react-scripts start`)
-- `npm run build` — build production assets
-- `npm test` — run tests
-
-## Analytics & Consent
-
-This project includes a small, consent-aware analytics wrapper and a consent banner component that prevents analytics from running until a user explicitly Accepts.
-
-- Consent storage key: `analytics.consent` in `localStorage` (`'true'` or `'false'`).
-- Analytics wrapper: `src/utils/analytics.js` — exposes `enable`, `disable`, `trackEvent`, `pageview`, `consentGiven`, and `setConsent`.
-- Consent banner: `src/components/ConsentBanner.js` — simple Accept / Decline UI. On Accept it calls `analytics.setConsent(true)`.
-
-Wiring a real provider (Google Analytics gtag):
-
-1. Add your Measurement ID to environment variables, e.g. in PowerShell before starting:
-
-```powershell
-$env:REACT_APP_GA_MEASUREMENT_ID='G-XXXXXXXX'; npm start
-```
-
-2. Update `ConsentBanner` to call `analytics.enable({ ga: process.env.REACT_APP_GA_MEASUREMENT_ID })` when the user accepts (I can do this change for you).
-
-How to verify locally:
-
-1. Start the app with `npm start`.
-2. Without accepting the banner, open DevTools -> Network/Console and confirm there are no `gtag` network requests and no analytics logs.
-3. Accept the banner and click a repo — the wrapper logs an analytics event in the console (`[analytics] event repo_open { repo: ..., id: ... }`).
-
-If you'd like, I can automatically enable GA on Accept using the `REACT_APP_GA_MEASUREMENT_ID` env var and add a CI-safe way to publish source maps or configure a real analytics provider.
-
-## Server-side consent and Manage Data
-
-This project includes a small demo server that provides server-side consent storage and simple data export/delete endpoints.
-
-- Start the server (after installing dependencies):
-
-```powershell
-npm install
-npm run start:server
-```
-
-- Endpoints:
-   - `GET /api/consent` — returns the consent record for the current anonymous cookie id.
-   - `POST /api/consent` — body: `{ "consent": true|false }` to set server-side consent for the current cookie id.
-   - `POST /api/data-request` — returns a JSON export of stored data for the current cookie id (demo only).
-   - `DELETE /api/data` — deletes stored data for the current cookie id (GDPR demo).
-
-The client `Privacy` popover includes a "Manage data on server" link which opens a small modal that calls these endpoints (export/delete).
-
-
----
-
-## Troubleshooting
-
-If the app doesn't show GitHub data, check the following in order:
-
-1. Token missing or invalid
-   - Make sure `REACT_APP_GITHUB_TOKEN` is set in `.env` and the terminal session was restarted after editing `.env`.
-   - Inspect browser console/network tab for 401/403 errors.
-
-2. Rate limits
-   - If you see messages about rate limits, your token may be exhausted. The app warns when remaining requests are low. You can:
-     - Wait until the rate limit resets (the app prints reset times when possible), or
-     - Use a different token, or
-     - Reduce the number of API calls (limit repo count, reduce pages fetched).
-
-3. Missing node packages
-   - If you get build errors like `Can't resolve 'file-saver'` or `Can't resolve 'jszip'`, run:
-
-```powershell
+# Install additional peer dependencies
 npm install file-saver jszip
 ```
 
-4. LocalStorage / cache issues
-   - The app uses `localStorage` to cache GraphQL and REST responses. If storage is full or broken, clear the site data in your browser and reload.
+### Local Development
 
-5. Long running fetches
-   - Some operations (per-repo REST fallbacks) can be slow for users with many repos. The UI shows a progress bar during those operations.
+```bash
+# Terminal 1: Start React client (port 3000)
+npm start
 
-6. Console errors
-   - Open DevTools (F12) and check the Console and Network tabs. Most API or JSON parse errors are visible there and indicate which request failed.
-
----
-
-## OAuth (httpOnly cookie server flow)
-
-This project now supports a server-side GitHub OAuth flow that stores the access token in an httpOnly cookie (the SPA never writes the token to localStorage). Use this flow to avoid exposing tokens to JavaScript in the browser.
-
-1. Register an OAuth App on GitHub: https://github.com/settings/developers -> OAuth Apps
-   - Set the Authorization callback URL to `http://localhost:4000/auth/github/callback` (or your `OAUTH_REDIRECT_URI`).
-
-2. Copy `.env.example` to `.env` (or set the environment variables) and fill in values:
-
-```
-GITHUB_CLIENT_ID=your_client_id
-GITHUB_CLIENT_SECRET=your_client_secret
-CLIENT_APP_URL=http://localhost:3000
-OAUTH_REDIRECT_URI=http://localhost:4000/auth/github/callback
-```
-
-3. Start the server (in a separate terminal):
-
-```powershell
+# Terminal 2: Start Express server (port 4000)
 npm run start:server
 ```
 
-4. Start the client app and open the Login page. Click "Login with GitHub (OAuth)" and complete the GitHub authorize flow. After successful auth the server will set an httpOnly cookie and redirect back to the client.
+Then open http://localhost:3000 in your browser.
 
-5. The Login UI also supports entering a Personal Access Token (PAT) directly — but when you save a token via the UI it will be POSTed to the server and stored in an httpOnly cookie (the SPA will not keep the token in localStorage).
+### Environment Setup
 
-Token scopes
-- The server requests the following scopes by default when initiating OAuth: `read:user repo` (see `server/index.js` -> the `scope` param in `/auth/github`).
-- If you need finer-grained scopes, edit `server/index.js` and change the `scope` string for the `/auth/github` redirect.
-- The Login UI shows the token's effective scopes (returned by GitHub as `x-oauth-scopes`) after validation.
+Create a `.env` file in the project root (copy from `.env.example`):
 
-Security notes
-- The server stores the access token in an httpOnly cookie (`github_token`) to reduce exposure to XSS.
-- For production, set the cookie `secure: true` and consider SameSite policies, CSRF protections, and session management. You may also consider server-side session storage or a token store rather than cookies if you need token revocation or multi-server setups.
+```env
+# GitHub OAuth (register at https://github.com/settings/developers)
+GITHUB_CLIENT_ID=your_client_id
+GITHUB_CLIENT_SECRET=your_client_secret
 
+# URLs
+CLIENT_APP_URL=http://localhost:3000
+OAUTH_REDIRECT_URI=http://localhost:4000/auth/github/callback
+REACT_APP_API_SERVER=http://localhost:4000
 
-## Code structure (important files)
+# Optional: Google Analytics (for consent demo)
+REACT_APP_GA_MEASUREMENT_ID=G-XXXXXXXX
+```
 
-- `src/App.js` — main dashboard component and orchestration
-- `src/githubApi.js` — REST/GraphQL helpers, caching, rate-limit checks
-- `src/components/RepoList.js` — repository list, search & sort
-- `src/components/Heatmap.js` — contribution heatmap
-- `src/components/TimeSeriesCharts.js` — monthly charts
-- `src/utils/export.js` — export helpers (JSON/CSV/zip/report)
-- `src/hooks/useGitHubData.js` — custom hooks for fetching and caching
+**Note**: Never commit `.env` file to version control. Use `.env.example` as a template.
 
 ---
 
-## Next steps & recommendations
+## 📖 Usage Guide
 
-If you want to make this project production-ready or more robust, consider:
+### Login Methods
 
-- Adding tests for the aggregation and export utilities (there are some tests already under `src/__tests__`)
-- Converting code to TypeScript (better type safety for API payloads)
-- Improving GraphQL pagination and splitting repo queries to avoid complexity limits
-- Implementing virtualization for the repo list if you have hundreds of repos
-- Adding a lightweight backend proxy to avoid exposing tokens in the frontend in production
+#### 1. OAuth (Recommended for Production)
+
+1. Click **"Login with GitHub (OAuth)"**
+2. (Optional) Click **"Show OAuth scopes"** to preview permissions
+3. Authorize the app on GitHub
+4. Automatically redirected to dashboard
+
+✅ **Benefits**: Secure, no token management, temporary access
+
+#### 2. Personal Access Token (Quick Testing)
+
+1. Enter GitHub token in the input field
+2. Click **"Test token"** to verify
+3. Click **"Save token"** to authenticate
+4. Access dashboard
+
+⚠️ **Note**: Token stored in secure httpOnly cookie server-side, not in browser
+
+### Dashboard Navigation
+
+- **Overview Tab**: High-level statistics and charts
+- **Repositories Tab**: Browse and search your repositories
+- **Privacy Button**: Manage consent and data
+- **Dark/Light Toggle**: Theme preference
+- **Login/Logout**: Authentication controls
+
+### Data Management
+
+1. Click **"Privacy"** button in header
+2. Select **"Manage data on server"**
+3. Options:
+   - **Request export**: Download JSON of stored data
+   - **Delete my data**: Remove all stored records (GDPR)
+   - **Close**: Return to app
 
 ---
+
+## 🔐 Authentication
+
+### How It Works
+
+```
+┌─────────┐         ┌──────────┐         ┌────────┐
+│  Client │◄────────│  Server  │────────►│ GitHub │
+└─────────┘         └──────────┘         └────────┘
+    │                    │                    │
+    │ Click OAuth        │ Redirect to Auth   │
+    ├───────────────────►├───────────────────►│
+    │                    │                    │
+    │                    │◄─ User Authorizes ─┤
+    │                    │                    │
+    │                    │ Exchange Code      │
+    │                    ├───────────────────►│
+    │                    │◄─ Get Token ───────┤
+    │                    │                    │
+    │◄─ Redirect + Cookie ─┤                  │
+    │                    │ Set httpOnly Cookie
+    │
+    ├─ API calls with credentials: 'include'
+    │ (Sends httpOnly cookie automatically)
+    │
+```
+
+### Token Storage
+
+- **Server-Side httpOnly Cookie**: Secure, HttpOnly flag prevents JavaScript access
+- **Never in localStorage**: Reduces XSS vulnerability surface
+- **Auto-Sent with Requests**: Cookie included automatically with `credentials: 'include'`
+
+### Scopes Requested
+
+- `read:user`: Public profile information
+- `repo`: Repository access (public and private)
+
+---
+
+## 📁 Project Structure
+
+```
+My-Github-Analysics/
+├── src/
+│   ├── App.js                          # Main app & routing
+│   ├── githubApi.js                    # API helpers (REST/GraphQL + proxy)
+│   ├── index.css                       # Global styles
+│   ├── components/
+│   │   ├── Login.js                    # OAuth & PAT login
+│   │   ├── ManageData.js               # GDPR data management modal
+│   │   ├── PrivacyPreferences.js       # Privacy settings popover
+│   │   ├── ConsentBanner.js            # Analytics consent banner
+│   │   ├── RepoList.js                 # Repository list with search/sort
+│   │   ├── RepoModal.js                # Repository details modal
+│   │   ├── RepoSearch.js               # Search & filter controls
+│   │   ├── Heatmap.js                  # Contribution heatmap
+│   │   ├── TimeSeriesCharts.js         # Monthly activity charts
+│   │   ├── LoadingSpinner.js           # Loading indicator
+│   │   ├── ErrorBoundary.js            # Error boundary component
+│   │   └── __tests__/                  # Component tests
+│   ├── utils/
+│   │   ├── analytics.js                # Consent-aware analytics wrapper
+│   │   ├── export.js                   # Export helpers (JSON/CSV/zip)
+│   │   ├── aggregate.js                # Data aggregation utilities
+│   │   ├── heatmap.js                  # Heatmap calculations
+│   │   └── __tests__/                  # Utility tests
+│   ├── hooks/
+│   │   └── useGitHubData.js            # Custom hook for data fetching
+│   └── __tests__/
+│       ├── aggregate.test.js
+│       ├── analytics.test.js
+│       └── fetchGraphQL.test.js
+├── server/
+│   ├── index.js                        # Express server with OAuth + proxies
+│   └── data/
+│       └── db.json                     # Local data storage (demo)
+├── public/
+│   ├── index.html
+│   ├── manifest.json
+│   └── robots.txt
+├── package.json                        # Dependencies & scripts
+├── .env.example                        # Environment variables template
+├── tailwind.config.js                  # Tailwind CSS config
+├── postcss.config.js                   # PostCSS config
+└── README.md                           # This file
+```
+
+---
+
+## 🛠️ Available Scripts
+
+```bash
+# Development
+npm start              # Start React dev server (port 3000)
+npm run start:server   # Start Express server (port 4000)
+
+# Testing
+npm test               # Run test suite in watch mode
+npm run test:ci        # Run tests once (CI mode)
+
+# Production
+npm run build          # Create optimized build in ./build/
+npm run eject          # Eject from Create React App (irreversible)
+```
+
+---
+
+## 🔗 API Reference
+
+### Client-Side (GraphQL & REST via `src/githubApi.js`)
+
+```javascript
+// REST API call (with client token or via server proxy)
+const data = await fetchGitHub('/user/repos?per_page=100');
+
+// GraphQL query (with caching)
+const result = await fetchGraphQL(query, variables, { useCache: true, ttl: 300 });
+
+// Paginated REST (auto-handles pagination)
+const allRepos = await fetchAllPagesREST('/user/repos', { per_page: 100, maxPages: 10 });
+
+// Check rate limit
+const limits = await checkRateLimit();
+```
+
+### Server-Side Endpoints (Express in `server/index.js`)
+
+```bash
+# Authentication
+GET  /auth/github                    # Start OAuth flow
+GET  /auth/github/callback           # OAuth callback (auto-redirects)
+POST /auth/token/test                # Test PAT without saving
+POST /auth/token                     # Save PAT to httpOnly cookie
+POST /auth/logout                    # Clear authentication
+
+# GitHub API Proxies
+GET  /api/github/user                # Get authenticated user
+GET  /api/github/scopes              # Get token scopes
+GET  /api/github/rest?path=/user/repos  # Generic REST proxy
+POST /api/github/graphql             # GraphQL proxy
+
+# Data Management
+GET  /api/consent                    # Get consent record
+POST /api/consent                    # Set consent preference
+POST /api/data-request               # Export user data
+DELETE /api/data                     # Delete user data
+```
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run all tests (watch mode)
+npm test
+
+# Run specific test file
+npm test Login.test.js
+
+# Run with coverage
+npm test -- --coverage
+
+# Run in CI mode (single run)
+CI=true npm test -- --watchAll=false
+```
+
+**Test Coverage:**
+- ✅ Login component (OAuth/PAT flow)
+- ✅ Data management (export/delete)
+- ✅ API helpers (REST/GraphQL)
+- ✅ Analytics wrapper
+- ✅ Export utilities
+- ✅ Charts and visualizations
+
+---
+
+## 📤 Deployment to Vercel
+
+### Prerequisites
+
+- Vercel account (free at https://vercel.com)
+- GitHub OAuth App credentials
+
+### Step-by-Step
+
+1. **Create GitHub OAuth App**
+   - Visit: https://github.com/settings/developers
+   - New OAuth App → Fill in details
+   - Save Client ID and Client Secret
+
+2. **Deploy to Vercel**
+   ```bash
+   npm install -g vercel
+   vercel login
+   vercel
+   ```
+   Or use the Vercel Dashboard → Import Git Repository
+
+3. **Set Environment Variables** (in Vercel Dashboard)
+   ```
+   GITHUB_CLIENT_ID=<from OAuth app>
+   GITHUB_CLIENT_SECRET=<from OAuth app>
+   CLIENT_APP_URL=https://<your-vercel-url>.vercel.app
+   OAUTH_REDIRECT_URI=https://<your-vercel-url>.vercel.app/auth/github/callback
+   REACT_APP_API_SERVER=https://<your-vercel-url>.vercel.app
+   ```
+
+4. **Update GitHub OAuth App**
+   - Homepage URL: `https://<your-vercel-url>.vercel.app`
+   - Authorization callback URL: `https://<your-vercel-url>.vercel.app/auth/github/callback`
+
+5. **Redeploy**
+   - Vercel will auto-redeploy after env vars are set
+
+---
+
+## 🐛 Troubleshooting
+
+| Problem | Cause | Solution |
+|---------|-------|----------|
+| **Login shows "Failed to fetch"** | Server not running | Run `npm run start:server` in separate terminal |
+| **OAuth redirect fails** | Callback URL mismatch | Verify URL in GitHub OAuth app settings matches exactly |
+| **No data shows after login** | Invalid token scopes | Check token has `read:user` and `repo` scopes |
+| **"Rate limit exceeded"** | GitHub API limit hit | Wait for reset or use different token |
+| **Build fails on Vercel** | Missing dependencies | Run `npm install` locally; commit `package-lock.json` |
+| **Dark mode not persisting** | localStorage disabled | Enable localStorage in browser settings |
+| **Heatmap not loading** | GraphQL error | Check browser console for API errors; verify token |
+
+### Debug Tips
+
+```javascript
+// Check localStorage
+console.log(localStorage.getItem('github.token'));
+console.log(localStorage.getItem('analytics.consent'));
+
+// Verify server reachability
+fetch('http://localhost:4000/api/github/user', { credentials: 'include' })
+
+// Check API rate limit
+fetch('https://api.github.com/rate_limit', {
+  headers: { Authorization: 'token YOUR_TOKEN' }
+}).then(r => r.json()).then(console.log);
+```
+
+---
+
+## 🔒 Security
+
+### Best Practices Implemented
+
+✅ **httpOnly Cookies**: Token stored server-side, not in JavaScript  
+✅ **CORS Configuration**: Only allows requests from configured origin  
+✅ **State Validation**: CSRF protection using state tokens  
+✅ **Consent Management**: GDPR-compliant data handling  
+✅ **Error Handling**: No sensitive data in error messages  
+
+### Production Recommendations
+
+- [ ] Set `secure: true` on cookies (HTTPS only)
+- [ ] Implement CSRF tokens for state-changing operations
+- [ ] Add rate limiting to server endpoints
+- [ ] Use environment-specific configurations
+- [ ] Implement logging and monitoring
+- [ ] Add API request signing or JWTs
+- [ ] Consider server-side session storage instead of cookies
+- [ ] Regularly rotate OAuth app secrets
+
+---
+
+## 📝 Analytics & Consent
+
+The app includes a consent-first analytics system:
+
+1. **Consent Banner** appears on first visit
+2. **User selects** Accept/Decline
+3. **Stored in localStorage** and server (if opted in)
+4. **Analytics only tracks** after explicit consent
+
+### Privacy Features
+
+- 🔒 Server-side consent storage
+- 📊 Consent records exportable
+- 🗑️ Data fully deletable (GDPR)
+- 🎯 No tracking without consent
+- 📱 Device-specific consent (anon ID cookies)
+
+---
+
+## 🚀 Advanced Configuration
+
+### Google Analytics Integration
+
+```javascript
+// In src/components/ConsentBanner.js
+if (consent) {
+  analytics.enable({
+    ga: process.env.REACT_APP_GA_MEASUREMENT_ID
+  });
+}
+```
+
+### Custom API Server
+
+```env
+# Point to custom API server instead of default
+REACT_APP_API_SERVER=https://api.your-domain.com
+```
+
+### OAuth Scope Customization
+
+Edit `server/index.js` line 47:
+
+```javascript
+scope: 'read:user repo admin:repo_hook', // Add or remove scopes
+```
+
+---
+
+## 📚 Resources
+
+- [GitHub REST API Docs](https://docs.github.com/en/rest)
+- [GitHub GraphQL API Docs](https://docs.github.com/en/graphql)
+- [React Documentation](https://react.dev)
+- [Tailwind CSS](https://tailwindcss.com)
+- [Recharts](https://recharts.org)
+
+---
+
+## 🤝 Contributing
+
+Contributions welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+---
+
+## 📄 License
+
+This project is open source and available under the MIT License.
+
+---
+
+## 🙋 Support
+
+For issues, questions, or suggestions:
+
+- **GitHub Issues**: https://github.com/NiteshChaudhari-exe/My-Github-Analysics/issues
+- **Documentation**: See inline code comments and component JSDoc
+- **Local Testing**: Follow the Quick Start section above
+
+---
+
+**Built with ❤️ by developers, for developers**

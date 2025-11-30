@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { getApiServerUrl } from '../utils/apiServer.js';
 
 export default function ManageData({ onClose }) {
   const [serverConsent, setServerConsent] = useState(null);
@@ -6,7 +7,7 @@ export default function ManageData({ onClose }) {
   const [message, setMessage] = useState('');
 
   // Determine API server URL (same as Login component)
-  const apiServer = (process.env.REACT_APP_API_SERVER && process.env.REACT_APP_API_SERVER.trim()) || `${window.location.protocol}//${window.location.hostname}:4000`;
+  const apiServer = getApiServerUrl();
 
   useEffect(() => {
     fetch(`${apiServer.replace(/\/$/, '')}/api/consent`, { credentials: 'include' })
