@@ -24,8 +24,11 @@ const app = express();
 app.use(express.json());
 app.use(cookieParser());
 // Allow client origin from env or default to localhost:3000
-const CLIENT_APP_URL = process.env.CLIENT_APP_URL || 'http://localhost:3000';
-app.use(cors({ origin: [CLIENT_APP_URL], credentials: true }));
+const CLIENT_APP_URL = process.env.CLIENT_APP_URL || '';
+const corsOptions = CLIENT_APP_URL
+  ? { origin: [CLIENT_APP_URL, 'http://localhost:3000'], credentials: true }
+  : { origin: true, credentials: true };
+app.use(cors(corsOptions));
 
 const crypto = require('crypto');
 const https = require('https');

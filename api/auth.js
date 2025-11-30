@@ -12,13 +12,24 @@ app.use(express.json());
 app.use(cookieParser());
 
 // CORS configuration
-const CLIENT_APP_URL = process.env.CLIENT_APP_URL || 'http://localhost:3000';
-app.use(cors({
-  origin: [CLIENT_APP_URL, 'http://localhost:3000'],
-  credentials: true,
-  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+const CLIENT_APP_URL = process.env.CLIENT_APP_URL || '';
+// If CLIENT_APP_URL is configured, restrict to that and localhost for dev;
+// otherwise, echo the request origin (useful for debugging/deployments where env var isn't set).
+const corsOptions = CLIENT_APP_URL
+  ? {
+      origin: [CLIENT_APP_URL, 'http://localhost:3000'],
+      credentials: true,
+      methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+    }
+  : {
+      origin: true, // reflect request origin
+      credentials: true,
+      methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+    };
+
+app.use(cors(corsOptions));
 
 // Data persistence (in Vercel, use /tmp which is writable)
 const DATA_DIR = process.env.NODE_ENV === 'production' ? '/tmp' : path.join(__dirname, '../server/data');
